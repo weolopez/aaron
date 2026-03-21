@@ -62,6 +62,77 @@ async function runEval(evalPrompt, state, deps) {
 }
 
 // ════════════════════════════════════════════════════
+// CONTRACT VALIDATION
+// ════════════════════════════════════════════════════
+
+/**
+ * Verify that a mutated agent-loop.js still honors its module contract.
+ * Returns { valid: true } or { valid: false, violations: string[] }.
+ *
+ * Contract rules:
+ *   1. Must use ESM exports (not module.exports / require)
+ *   2. Must export SYSTEM (string), MAX_RETRIES (number), runTurn (function signature)
+ *   3. runTurn must accept (userMessage, state, deps) — 3 parameters
+ *   4. Must not inline execute(), extractCode(), createVFS(), createLLMClient()
+ *   5. Must not contain environment-specific branching
+ *   6. Must reference state.history (conversation memory)
+ *   7. Must call ui adapter methods (deps.ui.*)
+ */
+function validateContract(source) {
+  const violations = [];
+
+  // 1. Must use ESM, not CommonJS
+  if (/module\.exports\b/.test(source) || /\brequire\s*\(/.test(source)) {
+    violations.push('Uses CommonJS (module.exports/require) instead of ESM export');
+  }
+
+  // 2. Must export the required symbols
+  if (!/export\s+(const|let|var)\s+SYSTEM\b/.test(source)) {
+    violations.push('Missing: export const SYSTEM');
+  }
+  if (!/export\s+(const|let|var)\s+MAX_RETRIES\b/.test(source)) {
+    violations.push('Missing: export const MAX_RETRIES');
+  }
+  if (!/export\s+(async\s+)?function\s+runTurn\b/.test(source)) {
+    violations.push('Missing: export (async) function runTurn');
+  }
+
+  // 3. runTurn must have 3-param signature (userMessage, state, deps/destructured)
+  const sigMatch = source.match(/export\s+async\s+function\s+runTurn\s*\(([^)]*?)\)/);
+  if (sigMatch) {
+    const params = sigMatch[1].split(',').map(p => p.trim()).filter(Boolean);
+    if (params.length < 3) {
+      violations.push(`runTurn has ${params.length} params, needs 3: (userMessage, state, deps)`);
+    }
+  }
+
+  // 4. Must not inline invariant core functions
+  if (/\bnew\s+Function\b/.test(source)) {
+    violations.push('Inlines code execution (new Function) — must use deps.execute()');
+  }
+  if (/function\s+(execute|extractCode|createVFS|createLLMClient)\b/.test(source)) {
+    violations.push('Redefines invariant core function — must use deps.*');
+  }
+
+  // 5. No environment-specific branching in core logic
+  if (/typeof\s+window\b/.test(source) || /typeof\s+process\b/.test(source)) {
+    violations.push('Contains environment-specific branching (typeof window/process)');
+  }
+
+  // 6. Must use state.history for conversation memory
+  if (!/state\.history/.test(source)) {
+    violations.push('Does not reference state.history — conversation memory will be lost');
+  }
+
+  // 7. Must call UI adapter methods
+  if (!/ui\.setStatus/.test(source) && !/deps\.ui/.test(source)) {
+    violations.push('Does not call UI adapter methods (ui.setStatus, etc.)');
+  }
+
+  return { valid: violations.length === 0, violations };
+}
+
+// ════════════════════════════════════════════════════
 // SCORING
 // ════════════════════════════════════════════════════
 
@@ -124,6 +195,27 @@ export async function runExperiment({ evalPrompt, mutatePrompt, state, deps, log
   log('asking agent to mutate harness...');
   await deps.runTurn(mutatePrompt, state, deps);
   log('mutation applied');
+
+  // 3b. Validate contract before proceeding
+  const mutatedSource = vfs.read('/harness/agent-loop.js');
+  if (mutatedSource) {
+    const check = validateContract(mutatedSource);
+    if (!check.valid) {
+      log(`contract violated — ${check.violations.length} issue(s):`);
+      for (const v of check.violations) log(`  ✕ ${v}`);
+      vfs.restore(snap);
+      state.history = savedHistory;
+      state.turn = savedTurn;
+
+      const reason = `contract: ${check.violations.join('; ')}`;
+      const entry = { ts: new Date().toISOString(), kept: false, reason, baseline: null, experiment: null, contractViolations: check.violations };
+      const existing = vfs.read('/memory/experiments.jsonl') ?? '';
+      vfs.write('/memory/experiments.jsonl', existing + JSON.stringify(entry) + '\n');
+      state.context.emit({ type: 'experiment', id: entry.ts, kept: false, reason });
+      return { kept: false, baseline: null, experiment: null, reason };
+    }
+    log('contract validated ✓');
+  }
 
   // 4. Run experiment eval
   state.history = [];
