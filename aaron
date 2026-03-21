@@ -1,0 +1,13 @@
+#!/bin/sh
+# aaron — run the coding agent
+#
+# Usage:
+#   aaron                                    interactive REPL
+#   aaron "prompt"                           single-shot (skills auto-loaded)
+#   aaron skill list                         list installed skills
+#   aaron skill show <name>                  print a skill
+#   aaron skill create <name> "eval task"    create via RSI
+#   aaron skill improve <name> "eval task"   improve via RSI
+#   aaron skill rsi <name> "eval task"       create-or-improve via RSI
+#   aaron skill ... --budget N               set RSI budget (default 3)
+exec node "$(dirname "$0")/agent-harness.mjs" "$@"

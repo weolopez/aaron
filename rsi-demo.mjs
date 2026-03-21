@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { env } from 'node:process';
 import { createVFS, execute, createLLMClient, extractCode } from './agent-core.js';
 import { runTurn } from './agent-loop.js';
-import { runRSI } from './agent-rsi.js';
+import { runRSI, CONTRACT_RULES } from './agent-rsi.js';
 
 const API_KEY = env.ANTHROPIC_API_KEY ?? '';
 if (!API_KEY) { console.error('ANTHROPIC_API_KEY not set'); process.exit(1); }
@@ -93,7 +93,13 @@ const evalPrompt = 'Write a function called fibonacci(n) that returns the nth fi
 
 const mutatePrompt = [
   'Read /harness/agent-loop.js — this is your own harness code.',
-  'Analyze the SYSTEM prompt and the runTurn function.',
+  '',
+  'CRITICAL — structural contract you MUST preserve when rewriting this file:',
+  ...CONTRACT_RULES.map(r => `  - ${r}`),
+  '',
+  'The safest approach: modify only the SYSTEM prompt string, then write the entire file back.',
+  'Do NOT rewrite the runTurn function or module structure from scratch.',
+  '',
   'Propose ONE targeted improvement that could help the agent complete tasks more reliably.',
   'Write the improved version back to /harness/agent-loop.js.',
   'Explain what you changed in a progress emit before the done emit.',

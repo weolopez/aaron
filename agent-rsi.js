@@ -10,10 +10,14 @@
  *   6. Log result to /memory/experiments.jsonl
  *   7. Repeat up to budget
  *
- * See ADR.md Decision 11.
+ * Also supports skill-targeted RSI (same loop against /skills/*).
  *
- * Exports: runExperiment, runRSI
+ * See ADR.md Decision 11, Decision 13.
+ *
+ * Exports: runExperiment, runRSI, runSkillExperiment, runSkillRSI
  */
+
+import { buildSkillIndex } from './agent-loop.js';
 
 // ════════════════════════════════════════════════════
 // EVAL RUNNER
@@ -78,6 +82,18 @@ async function runEval(evalPrompt, state, deps) {
  *   6. Must reference state.history (conversation memory)
  *   7. Must call ui adapter methods (deps.ui.*)
  */
+export const CONTRACT_RULES = [
+  'MUST use ESM: export const SYSTEM, export const MAX_RETRIES, export async function runTurn',
+  'NEVER use module.exports or require()',
+  'runTurn signature MUST be: runTurn(userMessage, state, { llm, execute, extractCode, ui }) — exactly 3 params',
+  'NEVER redefine execute(), extractCode(), createVFS(), createLLMClient() or use new Function()',
+  'NEVER use typeof window or typeof process (no environment branching)',
+  'MUST use state.history for conversation memory',
+  'MUST call ui.setStatus(), ui.showCode(), ui.emitEvent(), ui.onRetry(), ui.onTurnComplete()',
+  'Only modify the SYSTEM prompt string or add logic around the existing runTurn structure',
+  'Preserve the retry loop pattern and error recovery flow',
+];
+
 function validateContract(source) {
   const violations = [];
 
@@ -301,6 +317,219 @@ export async function runRSI({ evalPrompt, mutatePrompt, budget = 5, state, deps
   }
 
   log(`\n═══ RSI COMPLETE: ${results.filter(r => r.kept).length}/${results.length} experiments kept ═══\n`);
+
+  return results;
+}
+
+// ════════════════════════════════════════════════════
+// SKILL CONTRACT VALIDATION
+// ════════════════════════════════════════════════════
+
+/**
+ * Validate a SKILL.md file meets the agentskills.io contract.
+ * Returns { valid: true } or { valid: false, violations: string[] }.
+ */
+function validateSkill(content, expectedName) {
+  const violations = [];
+
+  // Must have YAML frontmatter
+  const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!fmMatch) {
+    violations.push('Missing YAML frontmatter (---\\n...\\n---)');
+    return { valid: false, violations };
+  }
+
+  const yaml = fmMatch[1];
+  const name = yaml.match(/^name:\s*(.+)$/m)?.[1]?.trim();
+  const desc = yaml.match(/^description:\s*(.+)$/m)?.[1]?.trim();
+
+  if (!name) violations.push('Missing required frontmatter field: name');
+  if (!desc) violations.push('Missing required frontmatter field: description');
+  if (name && expectedName && name !== expectedName) {
+    violations.push(`Frontmatter name "${name}" does not match skill directory "${expectedName}"`);
+  }
+
+  // Must have substantive body content beyond frontmatter
+  const body = content.slice(fmMatch[0].length).trim();
+  if (body.length < 50) {
+    violations.push('Skill body too short — needs substantive instructions (50+ chars)');
+  }
+
+  return { valid: violations.length === 0, violations };
+}
+
+// ════════════════════════════════════════════════════
+// SKILL EXPERIMENT LOOP
+// ════════════════════════════════════════════════════
+
+/**
+ * Run a single skill RSI experiment.
+ *
+ * Same pattern as runExperiment but targets /skills/* instead of /harness/*.
+ * Rebuilds skillIndex after mutation so the eval sees updated skills.
+ *
+ * @param {object} opts
+ * @param {string} opts.evalPrompt    — The task to evaluate skill quality
+ * @param {string} opts.skillName     — The skill directory name (e.g. 'component-builder')
+ * @param {string} opts.mutatePrompt  — Instructions for the agent to improve the skill
+ * @param {object} opts.state         — Agent state (history, turn, context)
+ * @param {object} opts.deps          — { llm, execute, extractCode, runTurn, ui }
+ * @param {function} opts.log         — Logging function
+ * @returns {{ kept: boolean, baseline: object, experiment: object, reason: string }}
+ */
+export async function runSkillExperiment({ evalPrompt, skillName, mutatePrompt, state, deps, log }) {
+  const { vfs } = state.context;
+  log = log ?? (() => {});
+
+  // 1. Snapshot skills state
+  const snap = vfs.snapshot('/skills/');
+  const savedSkillIndex = state.context.skillIndex;
+  log('snapshot saved (skills)');
+
+  // 2. Run baseline eval (fresh history)
+  const savedHistory = [...state.history];
+  const savedTurn = state.turn;
+  state.history = [];
+  state.turn = 0;
+
+  log('running baseline eval...');
+  const baseline = await runEval(evalPrompt, state, deps);
+  log(`baseline: completed=${baseline.completed} errors=${baseline.errors} retries=${baseline.retries} ${baseline.durationMs}ms`);
+
+  // 3. Reset for mutation turn
+  state.history = [];
+  state.turn = 0;
+
+  log('asking agent to mutate skill...');
+  await deps.runTurn(mutatePrompt, state, deps);
+  log('mutation applied');
+
+  // 3b. Validate skill contract
+  const skillPath = `/skills/${skillName}/SKILL.md`;
+  const mutatedContent = vfs.read(skillPath);
+
+  if (!mutatedContent) {
+    log('skill file missing after mutation — discarding');
+    vfs.restore(snap);
+    state.context.skillIndex = savedSkillIndex;
+    state.history = savedHistory;
+    state.turn = savedTurn;
+
+    const reason = 'contract: skill file missing after mutation';
+    const entry = { ts: new Date().toISOString(), kept: false, reason, target: `skill:${skillName}`, baseline: null, experiment: null };
+    const existing = vfs.read('/memory/experiments.jsonl') ?? '';
+    vfs.write('/memory/experiments.jsonl', existing + JSON.stringify(entry) + '\n');
+    state.context.emit({ type: 'experiment', id: entry.ts, kept: false, reason });
+    return { kept: false, baseline: null, experiment: null, reason };
+  }
+
+  const check = validateSkill(mutatedContent, skillName);
+  if (!check.valid) {
+    log(`skill contract violated — ${check.violations.length} issue(s):`);
+    for (const v of check.violations) log(`  ✕ ${v}`);
+    vfs.restore(snap);
+    state.context.skillIndex = savedSkillIndex;
+    state.history = savedHistory;
+    state.turn = savedTurn;
+
+    const reason = `contract: ${check.violations.join('; ')}`;
+    const entry = { ts: new Date().toISOString(), kept: false, reason, target: `skill:${skillName}`, baseline: null, experiment: null, contractViolations: check.violations };
+    const existing = vfs.read('/memory/experiments.jsonl') ?? '';
+    vfs.write('/memory/experiments.jsonl', existing + JSON.stringify(entry) + '\n');
+    state.context.emit({ type: 'experiment', id: entry.ts, kept: false, reason });
+    return { kept: false, baseline: null, experiment: null, reason };
+  }
+  log('skill contract validated ✓');
+
+  // 3c. Rebuild skill index so experiment eval sees updated skills
+  state.context.skillIndex = buildSkillIndex(vfs);
+  log('skill index rebuilt');
+
+  // 4. Run experiment eval
+  state.history = [];
+  state.turn = 0;
+
+  log('running experiment eval...');
+  const experiment = await runEval(evalPrompt, state, deps);
+  log(`experiment: completed=${experiment.completed} errors=${experiment.errors} retries=${experiment.retries} ${experiment.durationMs}ms`);
+
+  // 5. Compare and decide
+  const kept = isBetter(baseline, experiment);
+  const reason = kept
+    ? `improved: errors ${baseline.errors}→${experiment.errors}, retries ${baseline.retries}→${experiment.retries}`
+    : `reverted: errors ${baseline.errors}→${experiment.errors}, retries ${baseline.retries}→${experiment.retries}`;
+
+  if (!kept) {
+    vfs.restore(snap);
+    state.context.skillIndex = savedSkillIndex;
+    log('discarded — skills restored to snapshot');
+  } else {
+    if (state.context.commit) {
+      await state.context.commit(`RSI skill: ${reason}`);
+    }
+    log('kept — skill updated and committed');
+  }
+
+  // 6. Log to experiments journal
+  const entry = {
+    ts: new Date().toISOString(),
+    kept,
+    reason,
+    target: `skill:${skillName}`,
+    baseline: { ...baseline },
+    experiment: { ...experiment },
+  };
+
+  const journalPath = '/memory/experiments.jsonl';
+  const existing = vfs.read(journalPath) ?? '';
+  vfs.write(journalPath, existing + JSON.stringify(entry) + '\n');
+
+  state.context.emit({ type: 'experiment', id: entry.ts, kept, reason });
+  state.context.emit({ type: 'metric', name: 'baseline_errors', value: baseline.errors, unit: 'count' });
+  state.context.emit({ type: 'metric', name: 'experiment_errors', value: experiment.errors, unit: 'count' });
+
+  // 7. Restore conversation state
+  state.history = savedHistory;
+  state.turn = savedTurn;
+
+  return { kept, baseline, experiment, reason };
+}
+
+// ════════════════════════════════════════════════════
+// SKILL RSI LOOP
+// ════════════════════════════════════════════════════
+
+/**
+ * Run the full skill RSI loop.
+ *
+ * @param {object} opts
+ * @param {string}   opts.evalPrompt    — Eval task
+ * @param {string}   opts.skillName     — Skill directory name
+ * @param {string}   opts.mutatePrompt  — Mutation instructions
+ * @param {number}   opts.budget        — Max experiments (default 5)
+ * @param {object}   opts.state         — Agent state
+ * @param {object}   opts.deps          — Dependencies
+ * @param {function} opts.log           — Logger
+ * @returns {object[]} Array of experiment results
+ */
+export async function runSkillRSI({ evalPrompt, skillName, mutatePrompt, budget = 5, state, deps, log }) {
+  log = log ?? (() => {});
+  const results = [];
+
+  log(`\n═══ SKILL RSI: ${skillName} — ${budget} experiments ═══\n`);
+
+  for (let i = 0; i < budget; i++) {
+    log(`\n─── experiment ${i + 1}/${budget} ───\n`);
+
+    const result = await runSkillExperiment({ evalPrompt, skillName, mutatePrompt, state, deps, log });
+    results.push(result);
+
+    const kept = results.filter(r => r.kept).length;
+    const discarded = results.filter(r => !r.kept).length;
+    log(`\nrunning total: ${kept} kept, ${discarded} discarded`);
+  }
+
+  log(`\n═══ SKILL RSI COMPLETE: ${results.filter(r => r.kept).length}/${results.length} experiments kept ═══\n`);
 
   return results;
 }

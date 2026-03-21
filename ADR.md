@@ -321,6 +321,93 @@ The shared core (`createVFS`, `execute`, `callLLM`, `extractCode`, `runTurn`, `S
 
 ---
 
+## Decision 13: Agent Skills (agentskills.io standard)
+
+### Decision
+
+Extensible skill system following the [Agent Skills open standard](https://agentskills.io/specification). Skills provide progressive disclosure — only names and descriptions are injected at startup; full instructions are loaded on demand from VFS.
+
+### On-disk structure
+
+```
+skills/
+  component-builder/
+    SKILL.md          ← required: YAML frontmatter (name, description) + instructions
+    references/       ← optional: supporting docs
+      patterns.md
+  code-review/
+    SKILL.md
+```
+
+### VFS mapping
+
+Skills map to `/skills/` in VFS and `skills/` on disk (via `VFS_DISK_MAP`).
+
+### SKILL.md format (agentskills.io compliant)
+
+```markdown
+---
+name: component-builder
+description: Build isomorphic UI components as pure render functions
+---
+
+# Component Builder
+
+Full instructions here — only loaded when the agent reads this file.
+```
+
+### Progressive disclosure flow
+
+1. **Startup:** Harness scans `/skills/*/SKILL.md`, parses YAML frontmatter (name + description only)
+2. **SYSTEM prompt injection:** Appends a compact skill index to the system prompt:
+   ```
+   AVAILABLE SKILLS — read the full SKILL.md when the task matches:
+     - component-builder: Build isomorphic UI components → context.vfs.read('/skills/component-builder/SKILL.md')
+   ```
+3. **Activation:** When a task matches a skill, the agent reads the full SKILL.md from VFS for detailed instructions, checklists, and templates
+4. **Supporting files:** Agent can also read `/skills/<name>/references/*` for additional context
+
+### Implementation
+
+- `parseSkillFrontmatter(content)` — extracts `{ name, description }` from YAML frontmatter
+- `buildSkillIndex(vfs)` — scans VFS for `/skills/*/SKILL.md`, returns formatted index string
+- Both exported from `agent-loop.js` (mutable — subject to RSI improvement)
+- `runTurn` appends `state.context.skillIndex` to SYSTEM when present
+- No new API surface — VFS is the activation mechanism (`context.vfs.read()`)
+
+### Rationale
+
+- **Zero new dependencies** — YAML frontmatter parsed with regex (name + description are single-line)
+- **Fully isomorphic** — skills load from VFS in both browser and CLI
+- **VFS-native** — no new API; agent reads skills the same way it reads any file
+- **Progressive disclosure** — keeps SYSTEM prompt lean while making full instructions available on demand
+- **RSI-compatible** — the agent can create, modify, and improve its own skills
+
+### RSI for Skills
+
+Skills participate in the same RSI loop as the harness (Decision 11), with a separate experiment runner:
+
+```
+snapshot /skills/* → baseline eval → mutate skill → validate → rebuild skillIndex → experiment eval → keep/discard
+```
+
+| Aspect | Harness RSI | Skill RSI |
+|--------|-------------|-----------|
+| Snapshot scope | `/harness/*` | `/skills/*` |
+| Mutation target | `agent-loop.js` | `/skills/<name>/SKILL.md` |
+| Contract validation | 7 structural checks | YAML frontmatter + body content |
+| Post-mutation hook | — | Rebuild `skillIndex` on context |
+| CLI command | `:rsi [budget]` | `:skill [budget]` |
+
+Skill contract rules:
+1. Must have YAML frontmatter with `name` and `description`
+2. Frontmatter `name` must match directory name
+3. Body must have substantive instructions (50+ chars)
+
+The `:skill` command supports both improving existing skills and creating new ones. After the RSI loop, the skill index is rebuilt so subsequent turns see the latest skill state.
+
+---
+
 ## Open Questions
 
 | #  | Question | Notes |
@@ -356,3 +443,4 @@ The shared core (`createVFS`, `execute`, `callLLM`, `extractCode`, `runTurn`, `S
 | 10 | Network | `context.fetch` passthrough → proxy later |
 | 11 | RSI | autoresearch pattern; agent on `/harness/`, human on `/program.md` |
 | 12 | Harness | Browser + CLI; identical core, swappable UI |
+| 13 | Agent Skills | agentskills.io standard; progressive disclosure via VFS |
