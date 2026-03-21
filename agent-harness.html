@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>agent/harness</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;1,400&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:       #09090b;
+  --bg2:      #0f0f12;
+  --bg3:      #16161a;
+  --bg4:      #1e1e24;
+  --border:   #252530;
+  --border2:  #2e2e3a;
+  --text:     #c4c0b8;
+  --dim:      #4e4e5a;
+  --dim2:     #6a6a78;
+  --amber:    #e8a030;
+  --amber-lo: rgba(232,160,48,0.08);
+  --amber-brd:rgba(232,160,48,0.3);
+  --cyan:     #32d4b0;
+  --cyan-lo:  rgba(50,212,176,0.06);
+  --cyan-brd: rgba(50,212,176,0.25);
+  --red:      #d95050;
+  --blue:     #5888d8;
+  --mono:     'JetBrains Mono', monospace;
+  --display:  'Syne', sans-serif;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── LAYOUT ─────────────────────────────────────── */
+#app {
+  display: grid;
+  grid-template-rows: 42px 1fr;
+  height: 100vh;
+}
+
+/* ── HEADER ─────────────────────────────────────── */
+header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 18px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  position: relative;
+  z-index: 10;
+}
+
+.logo {
+  font-family: var(--display);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  color: var(--amber);
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.logo em { color: var(--dim2); font-style: normal; font-weight: 700; }
+
+.header-sep {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.status-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dim2);
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+.status-chip::before {
+  content: '';
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--dim);
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+.status-chip.thinking { color: var(--amber); border-color: var(--amber-brd); }
+.status-chip.thinking::before { background: var(--amber); box-shadow: 0 0 6px var(--amber); animation: pulse 1s infinite; }
+.status-chip.running  { color: var(--cyan);  border-color: var(--cyan-brd);  }
+.status-chip.running::before  { background: var(--cyan);  box-shadow: 0 0 6px var(--cyan); animation: pulse 0.6s infinite; }
+.status-chip.error    { color: var(--red);   border-color: rgba(217,80,80,0.3); }
+.status-chip.error::before    { background: var(--red); }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.turn-counter {
+  font-size: 10.5px;
+  color: var(--dim);
+  letter-spacing: 0.06em;
+  flex-shrink: 0;
+}
+
+/* ── MAIN PANELS ─────────────────────────────────── */
+main {
+  display: grid;
+  grid-template-columns: 1fr 260px;
+  overflow: hidden;
+}
+
+/* ── LEFT: CONVERSATION ──────────────────────────── */
+.panel-left {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+}
+
+.conversation {
+  overflow-y: auto;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  scroll-behavior: smooth;
+}
+
+.conversation::-webkit-scrollbar { width: 3px; }
+.conversation::-webkit-scrollbar-track { background: transparent; }
+.conversation::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+/* Messages */
+.msg {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  animation: rise 0.18s ease both;
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(5px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.msg-label {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+  padding-left: 2px;
+}
+
+.msg.user  .msg-label { color: var(--amber); }
+.msg.agent .msg-label { color: var(--cyan);  }
+.msg.sys   .msg-label { color: var(--dim2);  }
+
+.msg-bubble {
+  padding: 10px 13px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}
+
+.msg.user .msg-bubble {
+  background: var(--amber-lo);
+  border-color: var(--amber-brd);
+  color: var(--amber);
+}
+
+.msg.sys .msg-bubble {
+  color: var(--dim2);
+  font-size: 12px;
+}
+
+/* Code block */
+.code-wrap {
+  border: 1px solid var(--border2);
+  border-left: 2px solid var(--cyan-brd);
+  border-radius: 3px;
+  background: var(--bg2);
+  overflow: hidden;
+}
+
+.code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 11px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg3);
+}
+
+.code-lang {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--cyan);
+}
+
+.code-lines {
+  font-size: 10px;
+  color: var(--dim);
+}
+
+.code-pre {
+  padding: 12px 14px;
+  font-size: 11.5px;
+  line-height: 1.75;
+  color: var(--text);
+  white-space: pre;
+  overflow-x: auto;
+  font-family: var(--mono);
+}
+
+.code-pre::-webkit-scrollbar { height: 3px; }
+.code-pre::-webkit-scrollbar-thumb { background: var(--border2); }
+
+/* ── INPUT AREA ──────────────────────────────────── */
+.input-area {
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--bg2);
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.input-wrap {
+  flex: 1;
+  position: relative;
+}
+
+textarea#input {
+  width: 100%;
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  border-radius: 3px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  padding: 9px 11px;
+  resize: none;
+  min-height: 52px;
+  max-height: 160px;
+  line-height: 1.6;
+  outline: none;
+  transition: border-color 0.15s;
+  display: block;
+}
+
+textarea#input:focus { border-color: var(--amber-brd); }
+textarea#input::placeholder { color: var(--dim); }
+
+.kbd-hint {
+  position: absolute;
+  bottom: 7px; right: 9px;
+  font-size: 9px;
+  color: var(--dim);
+  pointer-events: none;
+  letter-spacing: 0.05em;
+}
+
+#send {
+  background: var(--amber);
+  color: #000;
+  border: none;
+  border-radius: 3px;
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 0 16px;
+  height: 52px;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+  flex-shrink: 0;
+}
+
+#send:hover:not(:disabled) { background: #f0b042; }
+#send:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* ── RIGHT PANEL ─────────────────────────────────── */
+.panel-right {
+  display: grid;
+  grid-template-rows: 1fr 200px;
+  overflow: hidden;
+}
+
+.sub-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sub-panel + .sub-panel {
+  border-top: 1px solid var(--border);
+}
+
+.panel-label {
+  padding: 5px 12px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.panel-label .count {
+  background: var(--bg4);
+  border: 1px solid var(--border2);
+  border-radius: 10px;
+  padding: 1px 6px;
+  font-size: 9px;
+  color: var(--dim2);
+}
+
+.panel-body {
+  overflow-y: auto;
+  flex: 1;
+  padding: 6px 8px;
+}
+
+.panel-body::-webkit-scrollbar { width: 2px; }
+.panel-body::-webkit-scrollbar-thumb { background: var(--border2); }
+
+.panel-empty {
+  padding: 10px 6px;
+  color: var(--dim);
+  font-size: 11px;
+  font-style: italic;
+}
+
+/* ── EVENTS ──────────────────────────────────────── */
+.ev {
+  padding: 3px 5px;
+  border-radius: 2px;
+  font-size: 11px;
+  line-height: 1.5;
+  margin-bottom: 1px;
+  word-break: break-all;
+  animation: rise 0.12s ease;
+  display: flex;
+  gap: 5px;
+}
+
+.ev-icon { flex-shrink: 0; color: var(--dim); }
+.ev-text { color: var(--dim2); }
+
+.ev.progress .ev-icon { color: var(--blue); }
+.ev.progress .ev-text { color: var(--dim2); }
+.ev.result   .ev-icon { color: var(--cyan); }
+.ev.result   .ev-text { color: var(--text); }
+.ev.file_write .ev-icon { color: var(--amber); }
+.ev.file_write .ev-text { color: var(--amber); }
+.ev.file_read  .ev-icon { color: var(--dim2); }
+.ev.file_read  .ev-text { color: var(--dim); }
+.ev.done   .ev-icon { color: var(--cyan); }
+.ev.done   .ev-text { color: var(--cyan); }
+.ev.error  .ev-icon { color: var(--red); }
+.ev.error  .ev-text { color: var(--red); }
+
+/* ── VFS TREE ────────────────────────────────────── */
+.vfs-dir {
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dim);
+  padding: 8px 6px 2px;
+  font-weight: 600;
+}
+
+.vfs-dir:first-child { padding-top: 4px; }
+
+.vfs-file {
+  padding: 3px 6px 3px 10px;
+  font-size: 11px;
+  color: var(--dim2);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vfs-file:hover { background: var(--bg4); color: var(--text); }
+.vfs-file.dirty { color: var(--amber); }
+.vfs-file .vfs-icon { flex-shrink: 0; font-size: 10px; }
+.vfs-file .vfs-name { overflow: hidden; text-overflow: ellipsis; }
+
+/* ── FILE VIEWER MODAL ───────────────────────────── */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  animation: rise 0.12s ease;
+  padding: 20px;
+}
+
+.modal {
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: 4px;
+  width: min(90vw, 740px);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.6);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg3);
+  flex-shrink: 0;
+}
+
+.modal-path { font-size: 12px; color: var(--amber); }
+.modal-size { font-size: 10px; color: var(--dim); }
+
+.modal-close {
+  background: none;
+  border: none;
+  color: var(--dim);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 2px 6px;
+  border-radius: 2px;
+  transition: color 0.1s, background 0.1s;
+  line-height: 1;
+}
+.modal-close:hover { color: var(--text); background: var(--bg4); }
+
+.modal-body {
+  overflow: auto;
+  padding: 14px 16px;
+  flex: 1;
+}
+
+.modal-body pre {
+  font-size: 12px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+  font-family: var(--mono);
+}
+</style>
+</head>
+<body>
+
+<div id="app">
+  <header>
+    <div class="logo">agent<em>/harness</em></div>
+    <div class="header-sep"></div>
+    <div class="status-chip" id="status">idle</div>
+    <div class="turn-counter" id="turn-counter">turn 0</div>
+  </header>
+
+  <main>
+    <!-- LEFT: conversation -->
+    <div class="panel-left">
+      <div class="conversation" id="conversation"></div>
+      <div class="input-area">
+        <div class="input-wrap">
+          <textarea id="input" placeholder="Describe a task for the agent..." rows="3"></textarea>
+          <span class="kbd-hint">⌘↵ to run</span>
+        </div>
+        <button id="send">Run →</button>
+      </div>
+    </div>
+
+    <!-- RIGHT: events + VFS -->
+    <div class="panel-right">
+      <div class="sub-panel">
+        <div class="panel-label">
+          Events
+          <span class="count" id="event-count">0</span>
+        </div>
+        <div class="panel-body" id="events">
+          <div class="panel-empty">No events yet.</div>
+        </div>
+      </div>
+      <div class="sub-panel">
+        <div class="panel-label">
+          VFS
+          <span class="count" id="vfs-count">0</span>
+        </div>
+        <div class="panel-body" id="vfs-tree">
+          <div class="panel-empty">Empty — agent writes files here.</div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script type="module">
+
+import { createVFS, execute, createLLMClient, extractCode } from './agent-core.js';
+import { runTurn } from './agent-loop.js';
+
+// ════════════════════════════════════════════════════
+// CONFIG
+// ════════════════════════════════════════════════════
+
+const MODEL = 'claude-sonnet-4-20250514';
+const llm = createLLMClient({ model: MODEL });
+
+// ════════════════════════════════════════════════════
+// UI
+// ════════════════════════════════════════════════════
+
+const convEl     = document.getElementById('conversation');
+const eventsEl   = document.getElementById('events');
+const vfsEl      = document.getElementById('vfs-tree');
+const statusEl   = document.getElementById('status');
+const turnEl     = document.getElementById('turn-counter');
+const inputEl    = document.getElementById('input');
+const sendBtn    = document.getElementById('send');
+const evCount    = document.getElementById('event-count');
+const vfsCount   = document.getElementById('vfs-count');
+
+let eventTotal   = 0;
+let firstEvent   = true;
+
+function esc(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+const EV_ICONS = {
+  progress:   '◆',
+  result:     '→',
+  file_write: '✦',
+  file_read:  '◇',
+  done:       '✓',
+  error:      '✕',
+  metric:     '▪',
+  experiment: '◉',
+};
+
+const VFS_ICONS = {
+  '/scratch/':   '~',
+  '/artifacts/': '◈',
+  '/memory/':    '♦',
+  '/src/':       '◇',
+};
+
+function vfsIcon(path) {
+  for (const [prefix, icon] of Object.entries(VFS_ICONS)) {
+    if (path.startsWith(prefix)) return icon;
+  }
+  return '·';
+}
+
+const ui = {
+  setStatus(s) {
+    statusEl.textContent = s;
+    statusEl.className = 'status-chip ' +
+      (s === 'thinking' ? 'thinking' :
+       s === 'running'  ? 'running'  :
+       s === 'error'    ? 'error'    : '');
+    sendBtn.disabled = s !== 'idle' && s !== 'error';
+  },
+
+  setTurn(n) {
+    turnEl.textContent = `turn ${n}`;
+  },
+
+  addUserMsg(text) {
+    const el = document.createElement('div');
+    el.className = 'msg user';
+    el.innerHTML = `<div class="msg-label">you</div>
+      <div class="msg-bubble">${esc(text)}</div>`;
+    convEl.appendChild(el);
+    convEl.scrollTop = convEl.scrollHeight;
+  },
+
+  addSysMsg(text) {
+    const el = document.createElement('div');
+    el.className = 'msg sys';
+    el.innerHTML = `<div class="msg-label">system</div>
+      <div class="msg-bubble">${esc(text)}</div>`;
+    convEl.appendChild(el);
+    convEl.scrollTop = convEl.scrollHeight;
+  },
+
+  showCode(code) {
+    const lines = code.split('\n').length;
+    const el = document.createElement('div');
+    el.className = 'msg agent';
+    el.innerHTML = `
+      <div class="msg-label">agent → executing</div>
+      <div class="code-wrap">
+        <div class="code-header">
+          <span class="code-lang">javascript</span>
+          <span class="code-lines">${lines} line${lines !== 1 ? 's' : ''}</span>
+        </div>
+        <pre class="code-pre">${esc(code)}</pre>
+      </div>`;
+    convEl.appendChild(el);
+    convEl.scrollTop = convEl.scrollHeight;
+  },
+
+  emitEvent(ev) {
+    if (firstEvent) {
+      eventsEl.innerHTML = '';
+      firstEvent = false;
+    }
+
+    eventTotal++;
+    evCount.textContent = eventTotal;
+
+    const icon = EV_ICONS[ev.type] ?? '·';
+    let text = '';
+    switch (ev.type) {
+      case 'progress':   text = ev.message ?? ''; break;
+      case 'result':     text = JSON.stringify(ev.value ?? null); break;
+      case 'file_write': text = ev.path ?? ''; break;
+      case 'file_read':  text = ev.path ?? ''; break;
+      case 'done':       text = ev.message ?? 'done'; break;
+      case 'error':      text = ev.message ?? 'error'; break;
+      case 'metric':     text = `${ev.name}: ${ev.value} ${ev.unit ?? ''}`; break;
+      case 'experiment': text = `${ev.kept ? 'kept' : 'discarded'}: ${ev.reason ?? ''}`; break;
+      default:           text = JSON.stringify(ev);
+    }
+
+    const el = document.createElement('div');
+    el.className = `ev ${ev.type}`;
+    el.innerHTML = `<span class="ev-icon">${icon}</span><span class="ev-text">${esc(text)}</span>`;
+    eventsEl.appendChild(el);
+    eventsEl.scrollTop = eventsEl.scrollHeight;
+
+    // Mirror 'done' into conversation
+    if (ev.type === 'done') {
+      const d = document.createElement('div');
+      d.className = 'msg agent';
+      d.innerHTML = `<div class="msg-label">agent → done</div>
+        <div class="msg-bubble" style="background:var(--cyan-lo);border-color:var(--cyan-brd);color:var(--cyan);">${esc(ev.message ?? '')}</div>`;
+      convEl.appendChild(d);
+      convEl.scrollTop = convEl.scrollHeight;
+    }
+  },
+
+  refreshVFS(vfs) {
+    const paths = vfs.list();
+    vfsCount.textContent = paths.length;
+
+    if (paths.length === 0) {
+      vfsEl.innerHTML = '<div class="panel-empty">Empty.</div>';
+      return;
+    }
+
+    // Group by top-level directory
+    const groups = {};
+    for (const p of paths) {
+      const parts = p.split('/').filter(Boolean);
+      const dir   = parts.length > 1 ? '/' + parts[0] + '/' : '/';
+      if (!groups[dir]) groups[dir] = [];
+      groups[dir].push(p);
+    }
+
+    let html = '';
+    for (const [dir, filePaths] of Object.entries(groups)) {
+      html += `<div class="vfs-dir">${esc(dir)}</div>`;
+      for (const p of filePaths) {
+        const name  = p.split('/').pop();
+        const dirty = vfs.isDirty(p);
+        const icon  = vfsIcon(p);
+        html += `<div class="vfs-file ${dirty ? 'dirty' : ''}" data-path="${esc(p)}">
+          <span class="vfs-icon">${icon}</span>
+          <span class="vfs-name">${esc(name)}</span>
+        </div>`;
+      }
+    }
+
+    vfsEl.innerHTML = html;
+
+    vfsEl.querySelectorAll('.vfs-file').forEach(el => {
+      el.addEventListener('click', () => {
+        const path    = el.dataset.path;
+        const content = agentState.context.vfs.read(path) ?? '';
+        const bytes   = new Blob([content]).size;
+        showModal(path, content, bytes);
+      });
+    });
+  },
+
+  // ── UI adapter interface for runTurn ────────────
+
+  onRetry(attempt, max) {
+    this.setStatus(`retrying (${attempt}/${max})…`);
+  },
+
+  onTurnComplete(turn, vfs) {
+    this.setStatus('idle');
+    this.setTurn(turn);
+    this.refreshVFS(vfs);
+  },
+};
+
+function showModal(path, content, bytes) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-path">${esc(path)}</span>
+        <span class="modal-size">${bytes} bytes</span>
+        <button class="modal-close">✕</button>
+      </div>
+      <div class="modal-body"><pre>${esc(content)}</pre></div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('.modal-close').onclick = () => overlay.remove();
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  document.addEventListener('keydown', function esc(e) {
+    if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', esc); }
+  });
+}
+
+// ════════════════════════════════════════════════════
+// VFS HYDRATION (load harness code into VFS for RSI)
+// ════════════════════════════════════════════════════
+
+async function hydrateHarness(vfs) {
+  for (const f of ['agent-core.js', 'agent-loop.js']) {
+    try {
+      const content = await fetch(f).then(r => r.text());
+      vfs.write(`/harness/${f}`, content);
+      vfs.markClean(`/harness/${f}`);
+    } catch { /* skip */ }
+  }
+}
+
+// ════════════════════════════════════════════════════
+// INIT
+// ════════════════════════════════════════════════════
+
+const vfs = createVFS();
+
+const agentState = {
+  history: [],
+  turn: 0,
+  context: {
+    vfs,
+    fetch: (...args) => fetch(...args),
+    emit: (ev) => ui.emitEvent(ev),
+    env: {},
+    async commit(message = 'commit') {
+      const dirty = vfs.list().filter(p => vfs.isDirty(p));
+      for (const p of dirty) vfs.markClean(p);
+      agentState.context.emit({ type: 'experiment', id: String(Date.now()), kept: true, reason: message });
+      return dirty;
+    },
+  },
+};
+
+const deps = { llm, execute, extractCode, ui };
+
+// Hydrate harness files into VFS
+hydrateHarness(vfs);
+
+// Greeting
+ui.addSysMsg(
+  'Harness ready. VFS is empty.\n\n' +
+  'Try: "Write a fibonacci function, test the first 10 values, and save the results to /artifacts/fib.md"'
+);
+
+// Send
+sendBtn.addEventListener('click', async () => {
+  const msg = inputEl.value.trim();
+  if (!msg || sendBtn.disabled) return;
+  inputEl.value = '';
+  inputEl.style.height = 'auto';
+  ui.addUserMsg(msg);
+  await runTurn(msg, agentState, deps);
+});
+
+// Keyboard shortcut
+inputEl.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+    sendBtn.click();
+  }
+});
+
+// Auto-resize textarea
+inputEl.addEventListener('input', () => {
+  inputEl.style.height = 'auto';
+  inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + 'px';
+});
+
+</script>
+</body>
+</html>
