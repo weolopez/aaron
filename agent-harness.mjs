@@ -9,7 +9,9 @@
  */
 
 import readline from 'node:readline/promises';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { stdin as input, stdout as output, env } from 'node:process';
 import { createVFS, execute, createLLMClient, extractCode } from './agent-core.js';
 import { runTurn } from './agent-loop.js';
@@ -169,6 +171,8 @@ const ui = {
 // VFS HYDRATION (load harness code into VFS for RSI)
 // ════════════════════════════════════════════════════
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
 function hydrateHarness(vfs) {
   for (const f of ['agent-core.js', 'agent-loop.js', 'agent-rsi.js', 'agent-harness.mjs']) {
     try {
@@ -177,6 +181,36 @@ function hydrateHarness(vfs) {
       vfs.markClean(`/harness/${f}`);
     } catch { /* file not found — skip */ }
   }
+}
+
+// VFS path → disk path mapping for commit
+const VFS_DISK_MAP = {
+  '/harness/': '',           // /harness/agent-loop.js → ./agent-loop.js
+  '/memory/':  'memory/',    // /memory/experiments.jsonl → ./memory/experiments.jsonl
+  '/artifacts/': 'artifacts/',
+};
+
+function vfsToDisk(vfsPath) {
+  for (const [prefix, diskPrefix] of Object.entries(VFS_DISK_MAP)) {
+    if (vfsPath.startsWith(prefix)) {
+      return join(__dirname, diskPrefix, vfsPath.slice(prefix.length));
+    }
+  }
+  return null; // unmapped paths don't get written to disk
+}
+
+function flushToDisk(vfs, paths) {
+  const written = [];
+  for (const p of paths) {
+    const diskPath = vfsToDisk(p);
+    if (!diskPath) continue;
+    const content = vfs.read(p);
+    if (content === null) continue;
+    mkdirSync(dirname(diskPath), { recursive: true });
+    writeFileSync(diskPath, content, 'utf8');
+    written.push(p);
+  }
+  return written;
 }
 
 // ════════════════════════════════════════════════════
@@ -202,8 +236,12 @@ async function repl() {
     env:   {},
     async commit(message = 'commit') {
       const dirty = vfs.list().filter(p => vfs.isDirty(p));
+      const written = flushToDisk(vfs, dirty);
       for (const p of dirty) vfs.markClean(p);
       context.emit({ type: 'experiment', id: String(Date.now()), kept: true, reason: message });
+      if (written.length > 0) {
+        context.emit({ type: 'progress', message: `flushed ${written.length} files to disk` });
+      }
       return dirty;
     },
   };

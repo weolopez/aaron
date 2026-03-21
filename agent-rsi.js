@@ -143,7 +143,11 @@ export async function runExperiment({ evalPrompt, mutatePrompt, state, deps, log
     vfs.restore(snap);
     log('discarded — harness restored to snapshot');
   } else {
-    log('kept — harness updated');
+    // Persist kept experiments via commit
+    if (state.context.commit) {
+      await state.context.commit(`RSI: ${reason}`);
+    }
+    log('kept — harness updated and committed');
   }
 
   // 6. Log to experiments journal

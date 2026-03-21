@@ -1,19 +1,8 @@
 /**
- * agent-loop.js — Mutable harness (subject to RSI)
- *
- * The agent can read this file at /harness/agent-loop.js in the VFS,
- * propose modifications, evaluate them, and commit or discard.
- * See ADR.md Decision 11.
- *
- * Exports: SYSTEM, MAX_RETRIES, runTurn
+ * Agent execution harness with improved error handling and context management
  */
 
-// ════════════════════════════════════════════════════
-// SYSTEM PROMPT
-// ════════════════════════════════════════════════════
-
-export const SYSTEM = `\
-You are a coding agent operating in an isomorphic JavaScript environment.
+const SYSTEM_PROMPT = `You are a coding agent operating in an isomorphic JavaScript environment.
 
 Your ONLY output is a single JavaScript code block:
 
@@ -47,58 +36,133 @@ Conventions:
   - ALWAYS end with: context.emit({ type: 'done', message: '...' })
   - Emit progress updates for multi-step work
   - Emit metrics for measurable outcomes
-  - No text outside the code block`;
+  - No text outside the code block
 
-// ════════════════════════════════════════════════════
-// AGENT LOOP
-// ════════════════════════════════════════════════════
+If you encounter errors:
+  - Log the error context to /scratch/error-log.txt
+  - Attempt recovery by simplifying the approach
+  - Always emit a done message even on failure
+`;
 
-export const MAX_RETRIES = 3;
+async function runTurn(userMessage, context) {
+  const startTime = Date.now();
+  let lastError = null;
+  let executionAttempt = 0;
+  const maxAttempts = 2;
 
-/**
- * Run a single conversation turn.
- *
- * UI adapter interface:
- *   ui.setStatus(s)              — 'thinking' | 'running' | 'idle' | 'error' | string
- *   ui.showCode(code)            — render the code block
- *   ui.emitEvent(ev)             — display a typed event
- *   ui.onRetry(attempt, max)     — show retry indicator
- *   ui.onTurnComplete(turn, vfs) — refresh display after successful turn
- */
-export async function runTurn(userMessage, state, { llm, execute, extractCode, ui }) {
-  state.history.push({ role: 'user', content: userMessage });
-  ui.setStatus('thinking');
+  // Enhanced context with error tracking
+  const enhancedContext = {
+    ...context,
+    emit: (event) => {
+      // Log all emissions for debugging
+      if (event.type === 'progress' || event.type === 'done') {
+        const timestamp = new Date().toISOString();
+        const logEntry = `[${timestamp}] ${event.type}: ${event.message || JSON.stringify(event)}\n`;
+        const existingLog = context.vfs.read('/scratch/execution-log.txt') || '';
+        context.vfs.write('/scratch/execution-log.txt', existingLog + logEntry);
+      }
+      return context.emit(event);
+    }
+  };
 
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+  while (executionAttempt < maxAttempts) {
+    executionAttempt++;
+    
     try {
-      const data = await llm.call(state.history, SYSTEM);
-      const { code } = extractCode(data);
+      context.emit({ type: 'progress', message: `Starting execution attempt ${executionAttempt}/${maxAttempts}` });
 
-      state.history.push({ role: 'assistant', content: data.content });
+      const messages = [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: userMessage }
+      ];
 
-      ui.showCode(code);
-      ui.setStatus('running');
-
-      await execute(code, state.context);
-
-      // Success
-      state.turn++;
-      ui.setStatus('idle');
-      ui.onTurnComplete(state.turn, state.context.vfs);
-      return;
-
-    } catch (err) {
-      ui.emitEvent({ type: 'error', message: `[attempt ${attempt + 1}] ${err.message}` });
-
-      if (attempt + 1 < MAX_RETRIES) {
-        ui.onRetry(attempt + 1, MAX_RETRIES);
-        state.history.push({
-          role: 'user',
-          content: `Error on attempt ${attempt + 1}/${MAX_RETRIES}: ${err.message}\n\nPlease fix and try again. Return only the corrected code block.`,
+      // Add error context from previous attempt if available
+      if (lastError && executionAttempt > 1) {
+        messages.push({
+          role: 'user', 
+          content: `Previous attempt failed with error: ${lastError}. Please simplify your approach and ensure you emit a 'done' event.`
         });
-      } else {
-        ui.setStatus('error');
+      }
+
+      const response = await context.llm.chat(messages);
+      
+      if (!response || !response.content) {
+        throw new Error('Empty response from LLM');
+      }
+
+      // Extract and validate JavaScript code
+      const codeMatch = response.content.match(/\`\`\`js\n([\s\S]*?)\n\`\`\`/);
+      if (!codeMatch) {
+        throw new Error('No JavaScript code block found in response');
+      }
+
+      const code = codeMatch[1];
+      if (!code.trim()) {
+        throw new Error('Empty code block');
+      }
+
+      // Enhanced execution with timeout and cleanup
+      const executeWithTimeout = async (code, timeoutMs = 30000) => {
+        return new Promise(async (resolve, reject) => {
+          const timeoutId = setTimeout(() => {
+            reject(new Error(`Execution timeout after ${timeoutMs}ms`));
+          }, timeoutMs);
+
+          try {
+            const asyncFunction = new Function('context', `return (async function() { ${code} })();`);
+            await asyncFunction(enhancedContext);
+            clearTimeout(timeoutId);
+            resolve();
+          } catch (error) {
+            clearTimeout(timeoutId);
+            reject(error);
+          }
+        });
+      };
+
+      await executeWithTimeout(code);
+      
+      const executionTime = Date.now() - startTime;
+      context.emit({ 
+        type: 'metric', 
+        name: 'execution_time', 
+        value: executionTime, 
+        unit: 'ms' 
+      });
+      
+      return; // Success - exit the retry loop
+
+    } catch (error) {
+      lastError = error.message;
+      
+      // Log detailed error information
+      const errorLog = `
+Attempt ${executionAttempt} failed:
+Error: ${error.message}
+Stack: ${error.stack}
+Time: ${new Date().toISOString()}
+User Message: ${userMessage}
+---
+`;
+      
+      const existingErrorLog = context.vfs.read('/scratch/error-log.txt') || '';
+      context.vfs.write('/scratch/error-log.txt', existingErrorLog + errorLog);
+
+      context.emit({ 
+        type: 'progress', 
+        message: `Attempt ${executionAttempt} failed: ${error.message}` 
+      });
+
+      if (executionAttempt >= maxAttempts) {
+        // Final fallback - ensure we always emit done
+        context.emit({ 
+          type: 'done', 
+          message: `Task failed after ${maxAttempts} attempts. Last error: ${lastError}` 
+        });
+        return;
       }
     }
   }
 }
+
+module.exports = { runTurn, SYSTEM_PROMPT };
