@@ -16,11 +16,11 @@ export const SYSTEM = `You are a coding agent operating in an isomorphic JavaScr
 
 Your ONLY output is a single JavaScript code block:
 
-\\\`\\\`\\\`js
+\`\`\`js
 // your code here
-\\\`\\\`\\\`
+\`\`\`
 
-The code runs inside an async function. You have access to a \\\`context\\\` object:
+The code runs inside an async function. You have access to a \`context\` object:
 
   context.vfs.read(path)            → string | null
   context.vfs.write(path, content)  → void
@@ -38,71 +38,29 @@ Emit event types:
   { type: 'done',       message: 'string' }
   { type: 'metric',     name: 'string', value: number, unit: 'string' }
 
+MULTI-STEP WORKFLOW PATTERN (for tasks requiring multiple files or phases):
+  1. PLAN FIRST: Write a build plan to /scratch/plan.md before coding
+  2. EMIT PROGRESS: context.emit({ type: 'progress', message: 'Step N: ...' }) between major steps
+  3. BUILD IN ORDER: dependency order (utilities -> components -> tests -> docs)
+  4. TEST AS YOU GO: verify each piece before building the next
+  5. EMIT METRICS: report measurable outcomes (files created, tests passed)
+
+CRITICAL - AVOID NESTED BACKTICK CONFLICTS:
+  When writing multi-line file content to VFS, use string concatenation or arrays
+  instead of template literals if the content might contain backticks (markdown
+  code fences, template literals, etc.). Nested backticks break code extraction.
+  GOOD: const lines = ['# Title', '', '## Usage']; context.vfs.write(path, lines.join('\n'));
+  GOOD: context.vfs.write(path, '# Heading\n\n' + 'Body text\n');
+
 Conventions:
   - Write scratch / planning work to /scratch/*
   - Write final outputs to /artifacts/*
   - Write durable memory to /memory/*
-  - Your own harness code is at /harness/* — you can read and improve it
+  - Your own harness code is at /harness/* -- you can read and improve it
   - ALWAYS end with: context.emit({ type: 'done', message: '...' })
   - Emit progress updates for multi-step work
   - Emit metrics for measurable outcomes
-  - No text outside the code block
-
-ISOMORPHIC UI PATTERNS — follow these for all UI components:
-
-1. PURE RENDER FUNCTIONS:
-   - Export functions that take (props, children) and return HTML strings
-   - Example: export const Button = (props, children) => \\\`<button class="\\\${props.class || ''}" onclick="\\\${props.onclick || ''}">\\\${children || 'Click'}</button>\\\`
-   - NO side effects, NO DOM manipulation, NO global state
-   - Functions must be deterministic: same inputs always produce same HTML output
-
-2. COMPONENT COMPOSITION:
-   - Build complex UIs by calling render functions within template literals
-   - Pass data down via props objects: { title, items, handlers }
-   - Example: const App = (props) => \\\`<div>\\\${Header(props.header)}\\\${Body(props.body)}</div>\\\`
-   - Nest components naturally: \\\`<main>\\\${List({ items: props.items })}</main>\\\`
-
-3. STATE MANAGEMENT:
-   - Use plain objects for state: const state = { count: 0, items: [], loading: false }
-   - Create state factory functions: const createState = () => ({ count: 0, user: null })
-   - Pass state and updater functions as props
-   - Example: const Counter = (props) => \\\`<div>Count: \\\${props.state.count} <button onclick="props.increment()">+</button></div>\\\`
-   - For updates: const newState = { ...state, count: state.count + 1 }
-
-4. EVENT HANDLING:
-   - Use inline onclick/onchange attributes with function calls
-   - Keep handlers simple and focused: onclick="handleClick(this.dataset.id)"
-   - Pass event handlers through props: { onSave: "saveTodo(this.value)", onDelete: "deleteTodo('\\\${item.id}')" }
-   - Example: \\\`<button onclick="\\\${props.onClick || 'console.log("clicked")'}">\\\${props.label}</button>\\\`
-
-5. TESTING PATTERN:
-   - Create test components that render to strings
-   - Assert on HTML content using string methods (.includes(), .match())
-   - Example: assert(Button({class: 'primary'}, 'Save').includes('class="primary"'))
-   - Test both structure and content: assert(html.includes('<button') && html.includes('Save'))
-   - Test prop handling: const html = Component({title: 'Test'}); assert(html.includes('Test'))
-
-6. HTML BEST PRACTICES:
-   - Use semantic HTML5 elements (article, section, nav, header, main, footer)
-   - Include proper accessibility attributes (aria-label, role, tabindex)
-   - Escape user content to prevent XSS: const escape = (str) => str?.toString().replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#x27;'})[m])
-   - Use CSS classes for styling, avoid inline styles unless dynamic
-   - Provide meaningful alt text for images: \\\`<img src="\\\${src}" alt="\\\${alt || 'Image'}" />\\\`
-
-7. COMPONENT PATTERNS:
-   - List components: \\\`<ul>\\\${items.map(item => \\\`<li>\\\${renderItem(item)}</li>\\\`).join('')}</ul>\\\`
-   - Conditional rendering: \\\`\\\${condition ? \\\`<div>Show this</div>\\\` : ''}\\\`
-   - Default props: const title = props.title || 'Default Title'
-   - Validation: if (!props.items) return '<div>No items provided</div>'
-
-8. ADVANCED PATTERNS:
-   - Higher-order components: const withLoading = (Component) => (props) => props.loading ? '<div>Loading...</div>' : Component(props)
-   - Component factories: const createList = (itemRenderer) => (props) => \\\`<ul>\\\${props.items.map(itemRenderer).join('')}</ul>\\\`
-   - Template slots: const Layout = (props) => \\\`<div class="layout">\\\${props.header || ''}<main>\\\${props.children}</main>\\\${props.footer || ''}</div>\\\`
-
-Remember: These components must work identically in browser and Node.js environments.
-Focus on clean, testable, composable render functions that return well-formed HTML strings.
-Every component should be a pure function with clear inputs and predictable outputs.`;
+  - No text outside the code block`;
 
 // ════════════════════════════════════════════════════
 // SKILL DISCOVERY (Agent Skills standard — agentskills.io)
@@ -122,19 +80,29 @@ export function parseSkillFrontmatter(content) {
 /** Scan VFS for skill SKILL.md files, return formatted index string for SYSTEM prompt. */
 export function buildSkillIndex(vfs) {
   const skills = [];
-  for (const path of vfs.list()) {
+  const allPaths = vfs.list();
+  for (const path of allPaths) {
     if (!path.startsWith('/skills/') || !path.endsWith('/SKILL.md')) continue;
     const parts = path.split('/');
     if (parts.length !== 4) continue; // /skills/<name>/SKILL.md
     const content = vfs.read(path);
     if (!content) continue;
     const meta = parseSkillFrontmatter(content);
-    if (meta) skills.push({ ...meta, path });
+    if (!meta) continue;
+    // Discover supplementary files (references/, scripts/, assets/)
+    const prefix = `/skills/${meta.name}/`;
+    const resources = allPaths
+      .filter(p => p.startsWith(prefix) && p !== path)
+      .map(p => p.slice(prefix.length));
+    skills.push({ ...meta, path, resources });
   }
   if (skills.length === 0) return '';
-  let index = '\nAVAILABLE SKILLS — read the full SKILL.md when the task matches:\n';
+  let index = '\nAVAILABLE SKILLS \u2014 read the full SKILL.md when the task matches:\n';
+  index += '  Skills may bundle references/ and scripts/ \u2014 SKILL.md will tell you what to read.\n';
   for (const s of skills) {
-    index += `  - ${s.name}: ${s.description} → context.vfs.read('${s.path}')\n`;
+    index += `  - ${s.name}: ${s.description} \u2192 context.vfs.read('${s.path}')`;
+    if (s.resources.length > 0) index += ` [+${s.resources.length} files]`;
+    index += '\n';
   }
   return index;
 }

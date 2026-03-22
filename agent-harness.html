@@ -123,8 +123,16 @@ header {
 /* ── MAIN PANELS ─────────────────────────────────── */
 main {
   display: grid;
-  grid-template-columns: 1fr 260px;
+  grid-template-columns: 1fr 1fr 260px;
   overflow: hidden;
+}
+
+main.preview-hidden {
+  grid-template-columns: 1fr 260px;
+}
+
+main.preview-hidden .panel-center {
+  display: none;
 }
 
 /* ── LEFT: CONVERSATION ──────────────────────────── */
@@ -488,6 +496,98 @@ textarea#input::placeholder { color: var(--dim); }
   color: var(--text);
   font-family: var(--mono);
 }
+
+/* ── PREVIEW PANEL ───────────────────────────────── */
+.panel-center {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+}
+
+.preview-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+  flex-shrink: 0;
+}
+
+.preview-toolbar .panel-label {
+  border-bottom: none;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.preview-toolbar select {
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  border-radius: 3px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 3px 8px;
+  outline: none;
+  flex: 1;
+  min-width: 0;
+}
+
+.preview-toolbar select:focus { border-color: var(--amber-brd); }
+
+.preview-toolbar button {
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  border-radius: 3px;
+  color: var(--dim2);
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: color 0.1s, border-color 0.1s;
+  flex-shrink: 0;
+  letter-spacing: 0.05em;
+}
+
+.preview-toolbar button:hover { color: var(--text); border-color: var(--amber-brd); }
+.preview-toolbar button.active { color: var(--cyan); border-color: var(--cyan-brd); }
+
+.preview-frame {
+  flex: 1;
+  border: none;
+  background: #fff;
+}
+
+.preview-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dim);
+  font-size: 11px;
+  font-style: italic;
+  padding: 20px;
+  text-align: center;
+  line-height: 1.6;
+}
+
+/* ── PREVIEW TOGGLE ──────────────────────────────── */
+.preview-toggle {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--dim2);
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: color 0.1s, border-color 0.1s;
+  flex-shrink: 0;
+  letter-spacing: 0.06em;
+}
+.preview-toggle:hover { color: var(--text); border-color: var(--amber-brd); }
+.preview-toggle.active { color: var(--cyan); border-color: var(--cyan-brd); }
 </style>
 </head>
 <body>
@@ -496,6 +596,7 @@ textarea#input::placeholder { color: var(--dim); }
   <header>
     <div class="logo">agent<em>/harness</em></div>
     <div class="header-sep"></div>
+    <button class="preview-toggle" id="preview-toggle" title="Toggle preview panel">preview</button>
     <div class="status-chip" id="status">idle</div>
     <div class="turn-counter" id="turn-counter">turn 0</div>
   </header>
@@ -511,6 +612,18 @@ textarea#input::placeholder { color: var(--dim); }
         </div>
         <button id="send">Run →</button>
       </div>
+    </div>
+
+    <!-- CENTER: component preview -->
+    <div class="panel-center" id="panel-center">
+      <div class="preview-toolbar">
+        <div class="panel-label">Preview</div>
+        <select id="preview-select"><option value="">— select file —</option></select>
+        <button id="preview-render" title="Re-render current selection">↻ render</button>
+        <button id="preview-src" title="Toggle source view">src</button>
+      </div>
+      <div class="preview-empty" id="preview-empty">Run a prompt to generate components.<br>HTML artifacts will appear here.</div>
+      <iframe class="preview-frame" id="preview-frame" sandbox="allow-scripts" style="display:none;"></iframe>
     </div>
 
     <!-- RIGHT: events + VFS -->
@@ -870,6 +983,255 @@ inputEl.addEventListener('input', () => {
   inputEl.style.height = 'auto';
   inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + 'px';
 });
+
+// ════════════════════════════════════════════════════
+// PREVIEW PANEL
+// ════════════════════════════════════════════════════
+
+const mainEl         = document.querySelector('main');
+const previewToggle  = document.getElementById('preview-toggle');
+const previewSelect  = document.getElementById('preview-select');
+const previewRender  = document.getElementById('preview-render');
+const previewSrc     = document.getElementById('preview-src');
+const previewFrame   = document.getElementById('preview-frame');
+const previewEmpty   = document.getElementById('preview-empty');
+
+let showSource = false;
+
+// Toggle preview panel visibility
+previewToggle.addEventListener('click', () => {
+  mainEl.classList.toggle('preview-hidden');
+  previewToggle.classList.toggle('active', !mainEl.classList.contains('preview-hidden'));
+});
+
+// Start with preview visible
+previewToggle.classList.add('active');
+
+// Detect previewable files: .html, .js (component modules), .css
+function isPreviewable(path) {
+  if (!path.startsWith('/artifacts/') && !path.startsWith('/scratch/')) return false;
+  return /\.(html|js|css|md)$/.test(path);
+}
+
+// Rebuild the file select dropdown from VFS
+function refreshPreviewSelect() {
+  const current = previewSelect.value;
+  const paths = vfs.list().filter(isPreviewable);
+  previewSelect.innerHTML = '<option value="">— select file —</option>';
+  for (const p of paths) {
+    const opt = document.createElement('option');
+    opt.value = p;
+    opt.textContent = p;
+    previewSelect.appendChild(opt);
+  }
+  // Restore selection if still valid, or auto-select newest component
+  if (paths.includes(current)) {
+    previewSelect.value = current;
+  } else if (paths.length > 0) {
+    // Prefer component files, then html, then anything
+    const comp = paths.find(p => p.includes('component')) ||
+                 paths.find(p => p.endsWith('.html')) ||
+                 paths[paths.length - 1];
+    previewSelect.value = comp;
+  }
+}
+
+// Build a full HTML document from VFS artifacts for preview
+function buildPreviewHTML(selectedPath) {
+  const content = vfs.read(selectedPath);
+  if (!content) return '<html><body><p>File not found.</p></body></html>';
+
+  // If it's a raw HTML file, render directly
+  if (selectedPath.endsWith('.html')) {
+    return content;
+  }
+
+  // If it's a markdown file, render simple preview
+  if (selectedPath.endsWith('.md')) {
+    const escaped = content
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return `<!DOCTYPE html>
+<html><head><style>
+  body { font-family: system-ui, sans-serif; max-width: 720px; margin: 20px auto; padding: 0 20px; line-height: 1.6; color: #1a1a1a; }
+  pre { background: #f4f4f4; padding: 12px; border-radius: 4px; overflow-x: auto; }
+  code { background: #f4f4f4; padding: 2px 5px; border-radius: 3px; font-size: 0.9em; }
+</style></head><body><pre>${escaped}</pre></body></html>`;
+  }
+
+  // If it's CSS, show a simple style demo
+  if (selectedPath.endsWith('.css')) {
+    return `<!DOCTYPE html>
+<html><head><style>${content}</style></head>
+<body><p>CSS loaded. Add HTML elements to see the styles.</p></body></html>`;
+  }
+
+  // For JS component modules: evaluate them and render the output
+  // Collect related files from artifacts
+  const allPaths = vfs.list().filter(p => p.startsWith('/artifacts/'));
+
+  // Gather all CSS files
+  let allCSS = '';
+  for (const p of allPaths) {
+    if (p.endsWith('.css')) {
+      allCSS += (vfs.read(p) || '') + '\n';
+    }
+  }
+
+  // Gather all JS modules (build dependency order: state first, then components, then tests/app)
+  const jsFiles = allPaths
+    .filter(p => p.endsWith('.js') && !p.endsWith('.test.js'))
+    .sort((a, b) => {
+      // state/util files first, then component files, then app files
+      const order = f => {
+        if (f.includes('state') || f.includes('util')) return 0;
+        if (f.includes('component') || f.includes('item') || f.includes('list')) return 1;
+        return 2;
+      };
+      return order(a) - order(b);
+    });
+
+  // Build a script that evaluates all the modules and renders
+  let evalScript = '';
+  for (const p of jsFiles) {
+    const src = vfs.read(p);
+    if (!src) continue;
+    // Remove export keywords so it runs as plain script
+    const cleaned = src
+      .replace(/^\s*export\s+(const|let|var|function|async\s+function|class)\s/gm, '$1 ')
+      .replace(/^\s*export\s+default\s+/gm, 'const _default = ')
+      .replace(/^\s*export\s*\{[^}]*\}\s*;?\s*$/gm, '');
+    evalScript += `// === ${p} ===\n${cleaned}\n\n`;
+  }
+
+  // Try to render: look for common app/render functions
+  evalScript += `
+// Auto-render: try known component patterns
+try {
+  let html = '';
+  // Look for TodoApp or similar top-level components
+  if (typeof TodoApp === 'function') {
+    const state = typeof createTodoState === 'function' ? createTodoState() : { todos: [], nextId: 1 };
+    // Add sample data
+    let s = state;
+    if (typeof addTodo === 'function') {
+      s = addTodo(s, 'Build something awesome');
+      s = addTodo(s, 'Test the components');
+      s = addTodo(s, 'Ship it!');
+      if (typeof toggleTodo === 'function') s = toggleTodo(s, 1);
+    }
+    html = TodoApp({ state: s, handlers: {} });
+  } else if (typeof App === 'function') {
+    html = App({});
+  } else if (typeof render === 'function') {
+    html = render();
+  } else {
+    // Try all exported functions that look like components (start with uppercase)
+    const comps = [];
+    ${jsFiles.map(p => {
+      const src = vfs.read(p) || '';
+      const fns = [...src.matchAll(/(?:export\s+)?(?:const|function)\s+([A-Z]\w+)/g)].map(m => m[1]);
+      return fns.map(fn => `if (typeof ${fn} === 'function') comps.push(['${fn}', ${fn}]);`).join('\n    ');
+    }).join('\n    ')}
+
+    if (comps.length > 0) {
+      html = '<div style="display:flex;flex-direction:column;gap:20px;">';
+      for (const [name, fn] of comps) {
+        try {
+          const result = fn({});
+          if (typeof result === 'string') {
+            html += '<div><h3 style="font-family:monospace;color:#666;font-size:12px;margin-bottom:8px;">&lt;' + name + '/&gt;</h3>' + result + '</div>';
+          }
+        } catch(e) {}
+      }
+      html += '</div>';
+    } else {
+      html = '<p style="color:#999;font-style:italic;">No renderable components found. Select a .html file or a component module.</p>';
+    }
+  }
+
+  document.getElementById('app').innerHTML = html;
+} catch(e) {
+  document.getElementById('app').innerHTML = '<pre style="color:red;padding:20px;">' + e.message + '\\n' + e.stack + '</pre>';
+}
+`;
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, sans-serif; padding: 20px; line-height: 1.5; color: #1a1a1a; }
+  ${allCSS}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+${evalScript}
+<` + `/script>
+</body>
+</html>`;
+}
+
+function renderPreview() {
+  const path = previewSelect.value;
+  if (!path) {
+    previewFrame.style.display = 'none';
+    previewEmpty.style.display = 'flex';
+    return;
+  }
+
+  const content = vfs.read(path);
+  if (!content) {
+    previewFrame.style.display = 'none';
+    previewEmpty.style.display = 'flex';
+    return;
+  }
+
+  previewEmpty.style.display = 'none';
+  previewFrame.style.display = 'block';
+
+  if (showSource) {
+    // Show raw source in the iframe
+    const escaped = content
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const srcHTML = `<!DOCTYPE html>
+<html><head><style>
+  body { background: #0f0f12; color: #c4c0b8; font-family: 'JetBrains Mono', monospace; font-size: 12px; padding: 16px; margin: 0; }
+  pre { white-space: pre-wrap; word-break: break-word; line-height: 1.75; }
+</style></head><body><pre>${escaped}</pre></body></html>`;
+    previewFrame.srcdoc = srcHTML;
+  } else {
+    previewFrame.srcdoc = buildPreviewHTML(path);
+  }
+}
+
+// Wire up controls
+previewSelect.addEventListener('change', () => { showSource = false; previewSrc.classList.remove('active'); renderPreview(); });
+previewRender.addEventListener('click', renderPreview);
+previewSrc.addEventListener('click', () => {
+  showSource = !showSource;
+  previewSrc.classList.toggle('active', showSource);
+  renderPreview();
+});
+
+// Hook into onTurnComplete to refresh preview
+const origOnTurnComplete = ui.onTurnComplete.bind(ui);
+ui.onTurnComplete = function(turn, vfsRef) {
+  origOnTurnComplete(turn, vfsRef);
+  refreshPreviewSelect();
+  renderPreview();
+};
+
+// Also refresh preview when file_write events occur
+const origEmitEvent = ui.emitEvent.bind(ui);
+ui.emitEvent = function(ev) {
+  origEmitEvent(ev);
+  if (ev.type === 'file_write') {
+    refreshPreviewSelect();
+  }
+};
 
 </script>
 </body>
