@@ -41,7 +41,7 @@ const c = (color, str) => `${A[color]}${str}${A.reset}`;
 // CONFIG
 // ════════════════════════════════════════════════════
 
-const MODEL = 'claude-sonnet-4-20250514';
+const MODEL = 'claude-haiku-4-5';
 const API_KEY = env.ANTHROPIC_API_KEY ?? '';
 
 const llm = createLLMClient({
