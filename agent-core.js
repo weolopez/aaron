@@ -107,7 +107,7 @@ export function createLLMClient({
       const res = await fetch(apiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...headers },
-        body: JSON.stringify({ model, max_tokens: 4096, system, messages }),
+        body: JSON.stringify({ model, max_tokens: 16384, system, messages }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -127,7 +127,10 @@ export function extractCode(data) {
     .filter(b => b.type === 'text')
     .map(b => b.text)
     .join('');
-  const match = text.match(/```(?:js|javascript)?\n([\s\S]*?)```/);
+  // Use greedy match to find the outermost code fence — handles nested ``` inside template literals
+  let match = text.match(/```(?:js|javascript)?\n([\s\S]*)```/);
+  // Fallback: if response was truncated (no closing fence), extract everything after the opening fence
+  if (!match) match = text.match(/```(?:js|javascript)?\n([\s\S]+)/);
   if (!match) {
     throw new Error(
       'No ```js code block in response. Response was:\n\n' +

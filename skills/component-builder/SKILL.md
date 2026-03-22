@@ -1,61 +1,93 @@
 ---
 name: component-builder
-description: Build isomorphic UI components as pure render functions returning HTML strings
+description: Build isomorphic UI components as pure render functions returning HTML strings. Use when creating UI components, widgets, cards, lists, forms, dashboards, or interactive elements.
 ---
 
 # Component Builder
 
 Build UI components that work identically in browser and Node.js.
 
+## When to use
+
+- Creating UI components (cards, buttons, lists, forms, dashboards)
+- Building reusable render functions
+- Testing component output with string assertions
+
 ## Approach
 
-1. **Pure render functions** — every component is `(props, children) => htmlString`
-2. **No DOM APIs** — no `document`, no `window`, no side effects
-3. **Composable** — nest components by calling them inside template literals
-4. **Testable** — assert on returned HTML strings with `.includes()` / `.match()`
+1. **Pure render functions** — `(props, children) => htmlString`
+2. **No DOM APIs** — no `document`, `window`, or side effects
+3. **Composable** — nest components inside template literals
+4. **Testable** — assert on returned HTML strings
 
-## Structure
+## Workflow
+
+Copy and track progress:
 
 ```
-/artifacts/<name>.js     — component module (ESM, named exports)
-/artifacts/<name>.test.js — tests (assertions, no framework)
+Component Progress:
+- [ ] Step 1: Define component API (props, defaults)
+- [ ] Step 2: Implement render function with XSS escaping
+- [ ] Step 3: Add accessibility (ARIA, semantic HTML)
+- [ ] Step 4: Write tests (structure, content, XSS, edge cases)
+- [ ] Step 5: Validate with checklist
 ```
 
-## Component Template
+### Step 1: Define Component API
+
+Identify all props. Set sensible defaults. Plan children slot usage.
 
 ```js
-// Escape user content to prevent XSS
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, m =>
-  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#x27;' })[m]);
-
-export const ComponentName = (props = {}, children = '') => {
-  const title = esc(props.title ?? 'Default');
-  return `<section class="component-name" role="region" aria-label="${title}">
-  <h2>${title}</h2>
-  <div class="content">${children}</div>
-</section>`;
+const Card = (props = {}, children = '') => {
+  const title = props.title ?? 'Untitled';
+  const variant = props.variant ?? 'default';
+  // ...
 };
 ```
 
-## Testing Template
+### Step 2: Implement with XSS Escaping
+
+**CRITICAL**: Always escape user-provided content to prevent XSS.
+
+Read the escape utility for the canonical implementation:
+→ `context.vfs.read('/skills/component-builder/scripts/escape.js')`
 
 ```js
-import { ComponentName } from './component-name.js';
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, m =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#x27;' })[m]);
 
-const html = ComponentName({ title: 'Hello' }, '<p>body</p>');
-console.assert(html.includes('Hello'), 'renders title');
-console.assert(html.includes('<p>body</p>'), 'renders children');
-console.assert(html.includes('role="region"'), 'has aria role');
-console.assert(html.includes('aria-label="Hello"'), 'has aria-label');
-
-// XSS safety
-const xss = ComponentName({ title: '<script>alert(1)</script>' });
-console.assert(!xss.includes('<script>'), 'escapes XSS in title');
-
-console.log('all tests passed');
+export const Card = (props = {}, children = '') => {
+  const title = esc(props.title ?? 'Untitled');
+  return `<article class="card" role="region" aria-label="${title}">
+  <h2>${title}</h2>
+  <div class="card-body">${children}</div>
+</article>`;
+};
 ```
 
-## Checklist
+### Step 3: Accessibility
+
+Read the accessibility reference for ARIA patterns by component type:
+→ `context.vfs.read('/skills/component-builder/references/accessibility.md')`
+
+Key rules:
+- Use semantic HTML5 elements (`article`, `section`, `nav`, not `div`)
+- Add `role` and `aria-label` on containers
+- Interactive elements need keyboard support (`tabindex`, key handlers)
+
+### Step 4: Write Tests
+
+Read the testing reference for assertion strategies and edge cases:
+→ `context.vfs.read('/skills/component-builder/references/testing-patterns.md')`
+
+```js
+const html = Card({ title: 'Hello' }, '<p>body</p>');
+console.assert(html.includes('Hello'), 'renders title');
+console.assert(html.includes('<p>body</p>'), 'renders children');
+console.assert(!Card({ title: '<script>' }).includes('<script>'), 'escapes XSS');
+```
+
+### Step 5: Validate
 
 - [ ] Named export (not default)
 - [ ] Props destructured with defaults
@@ -64,3 +96,61 @@ console.log('all tests passed');
 - [ ] Accessibility attributes (role, aria-label)
 - [ ] Test file with structure + content + XSS assertions
 - [ ] `context.emit({ type: 'done' })` at the end
+
+## Conditional Workflows
+
+**Simple component?** → Implement inline, write tests, validate
+
+**Complex component with state?** → Write plan to `/scratch/component-plan.md` first:
+1. List all states and transitions
+2. Define props interface
+3. Implement, then test each state
+
+**Component system?** → Build base components first, compose into complex ones
+
+## Output Structure
+
+```
+/artifacts/<name>.js       — component module (ESM, named exports)
+/artifacts/<name>.test.js  — tests (assertions, no framework)
+/artifacts/<name>.css      — styles (optional)
+```
+
+## Component Patterns
+
+### List rendering
+```js
+const List = (props = {}) => {
+  const items = props.items ?? [];
+  if (items.length === 0) return '<p>No items</p>';
+  return `<ul role="list">${items.map(item =>
+    `<li>${esc(item)}</li>`).join('')}</ul>`;
+};
+```
+
+### Conditional rendering
+```js
+const Alert = (props = {}) => {
+  if (!props.message) return '';
+  const type = props.type ?? 'info';
+  return `<div role="alert" class="alert alert-${esc(type)}">
+  ${esc(props.message)}
+</div>`;
+};
+```
+
+### Composition
+```js
+const Page = (props = {}) => `
+<main>
+  ${Header(props.header)}
+  ${Content(props, props.children)}
+  ${Footer(props.footer)}
+</main>`;
+```
+
+### Higher-order component
+```js
+const withLoading = (Component) => (props) =>
+  props.loading ? '<div aria-busy="true">Loading…</div>' : Component(props);
+```
