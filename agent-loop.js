@@ -20,6 +20,13 @@ Your ONLY output is a single JavaScript code block:
 // your code here
 \`\`\`
 
+PRE-FLIGHT CHECKLIST (ALWAYS DO THIS FIRST):
+  ✓ Validate inputs: Does the file/path exist? Check context.vfs.list() if uncertain
+  ✓ Check environment: Review context.env for feature flags before complex operations
+  ✓ Define success criteria: What does done look like? (files created, tests passing, etc.)
+  ✓ Plan error recovery: If a fetch/read/write fails, what's your fallback?
+  ✓ Use try/catch: Wrap risky operations (fetch, JSON.parse, regex matches) with error context
+
 The code runs inside an async function. You have access to a \`context\` object:
 
   context.vfs.read(path)            → string | null
@@ -52,9 +59,15 @@ CRITICAL - AVOID NESTED BACKTICK CONFLICTS:
   GOOD: const lines = ['# Title', '', '## Usage']; context.vfs.write(path, lines.join('\n'));
   GOOD: context.vfs.write(path, '# Heading\n\n' + 'Body text\n');
 
+ERROR HANDLING GUIDE:
+  • context.vfs.read(path) returns null if file doesn't exist → check before using
+  • context.fetch() may timeout or 4xx/5xx → check response.ok, wrap in try/catch
+  • context.commit() can fail if VFS is locked → emit error state clearly, suggest retry
+  • Always emit { type: 'progress' } with the error context before giving up
+
 Conventions:
-  - Write scratch / planning work to /scratch/*
-  - Write final outputs to /artifacts/*
+  - Write scratch / planning work to /scratch/<task-slug>/*
+  - Write final outputs to /artifacts/<task-slug>/<file>  (NEVER directly to /artifacts/<file>)
   - Write durable memory to /memory/*
   - Your own harness code is at /harness/* -- you can read and improve it
   - ALWAYS end with: context.emit({ type: 'done', message: '...' })

@@ -192,12 +192,14 @@ const ui = {
     output.write(c('gray',  '  node:  ') + c('dim', process.version) + '\n');
     output.write('\n');
     output.write(c('gray', '  Commands:\n'));
-    output.write(c('gray', '  :vfs   — list VFS contents\n'));
-    output.write(c('gray', '  :cat   — :cat /path  show a file\n'));
-    output.write(c('gray', '  :rsi   — run RSI experiment loop\n'));
-    output.write(c('gray', '  :skill — run skill RSI experiment loop\n'));
-    output.write(c('gray', '  :clear — reset conversation history\n'));
-    output.write(c('gray', '  :exit  — quit\n'));
+    output.write(c('gray', '  :vfs            — list VFS contents\n'));
+    output.write(c('gray', '  :cat /path      — show a file\n'));
+    output.write(c('gray', '  :workflow       — list workflows\n'));
+    output.write(c('gray', '  :workflow <name>— run or resume a workflow\n'));
+    output.write(c('gray', '  :rsi            — run RSI experiment loop\n'));
+    output.write(c('gray', '  :skill          — run skill RSI experiment loop\n'));
+    output.write(c('gray', '  :clear          — reset conversation history\n'));
+    output.write(c('gray', '  :exit           — quit\n'));
     output.write('\n');
     this.hr();
   },
@@ -605,6 +607,111 @@ async function repl() {
       if (journal) {
         output.write(c('gray', `  /memory/experiments.jsonl: ${journal.split('\n').filter(Boolean).length} entries`) + '\n');
       }
+      ui.hr();
+      continue;
+    }
+
+    if (msg === ':workflow' || msg.startsWith(':workflow ')) {
+      const wfName = msg.slice(10).trim();
+
+      if (!wfName) {
+        // List available workflows
+        const wfPaths = vfs.list().filter(p => p.startsWith('/workflows/') && p.endsWith('.json'));
+        if (wfPaths.length === 0) {
+          output.write(c('gray', '  No workflows found in /workflows/\n'));
+          output.write(c('gray', '  Ask the agent: "create a workflow called <name> to <goal>"\n'));
+        } else {
+          output.write('\n' + c('cyan', '  Workflows:') + '\n');
+          for (const p of wfPaths) {
+            try {
+              const wf = JSON.parse(vfs.read(p));
+              const stateRaw = vfs.read('/scratch/workflow-state.json');
+              const wfState = stateRaw ? JSON.parse(stateRaw) : null;
+              const active = wfState?.workflow === wf.name;
+              const done = wfState?.completedSteps?.length === wf.steps?.length;
+              const status = active ? (done ? c('green', 'complete') : c('amber', `step ${wfState.currentStep}`)) : c('gray', 'not started');
+              output.write(c('gray', `    ${wf.name}`) + '  ' + status + '\n');
+              if (wf.description) output.write(c('gray', `      ${wf.description}\n`));
+            } catch { output.write(c('gray', `    ${p}\n`)); }
+          }
+        }
+        output.write('\n');
+        continue;
+      }
+
+      // Run or resume named workflow
+      const wfPath = `/workflows/${wfName}.json`;
+      const wfRaw = vfs.read(wfPath);
+      if (!wfRaw) {
+        output.write(c('red', `  Workflow not found: ${wfPath}\n`));
+        output.write(c('gray', `  Ask the agent to create it first.\n`));
+        continue;
+      }
+
+      let wf;
+      try { wf = JSON.parse(wfRaw); }
+      catch { output.write(c('red', `  Invalid workflow JSON: ${wfPath}\n`)); continue; }
+
+      // Load or init checkpoint
+      const statePath = '/scratch/workflow-state.json';
+      let wfState = vfs.read(statePath) ? (() => { try { return JSON.parse(vfs.read(statePath)); } catch { return null; } })() : null;
+      if (!wfState || wfState.workflow !== wfName) {
+        wfState = { workflow: wfName, startedAt: new Date().toISOString(), completedSteps: [], currentStep: null, outputs: {} };
+        vfs.write(statePath, JSON.stringify(wfState, null, 2));
+      }
+
+      const totalSteps = wf.steps.length;
+      const doneSteps = wfState.completedSteps.length;
+      output.write('\n' + c('cyan', `  Workflow: ${wfName}`) + c('gray', ` (${doneSteps}/${totalSteps} steps done)`) + '\n');
+
+      // Drive steps sequentially
+      for (const step of wf.steps) {
+        if (wfState.completedSteps.includes(step.id)) {
+          output.write(c('gray', `  ✓ [${step.id}] already done\n`));
+          continue;
+        }
+
+        output.write('\n' + c('amber', `  ▶ [${step.id}]`) + c('gray', ` ${step.prompt.slice(0, 80)}`) + '\n');
+
+        // Update checkpoint
+        wfState.currentStep = step.id;
+        vfs.write(statePath, JSON.stringify(wfState, null, 2));
+
+        // Build the turn prompt — include skill instructions if referenced
+        let turnPrompt = step.prompt;
+        if (step.skill) {
+          const skillMd = vfs.read(`/skills/${step.skill}/SKILL.md`);
+          if (skillMd) {
+            turnPrompt = `Use the "${step.skill}" skill for this step.\n\n${step.prompt}`;
+          }
+        }
+
+        // Append checkpoint update instructions to the step prompt
+        turnPrompt += `\n\nAfter completing this step:
+1. Update /scratch/workflow-state.json: add "${step.id}" to completedSteps, set outputs["${step.id}"] to a brief result summary.
+2. Call await context.commit('workflow: ${wfName} — step ${step.id} complete').
+3. context.emit({ type: 'done', message: 'Step ${step.id} complete' })`;
+
+        ui.user(turnPrompt);
+        await runTurn(turnPrompt, state, deps);
+
+        // Read updated state after the step ran
+        const updatedRaw = vfs.read(statePath);
+        if (updatedRaw) {
+          try { wfState = JSON.parse(updatedRaw); } catch {}
+        }
+
+        // If agent didn't update completedSteps, do it here as a safety net
+        if (!wfState.completedSteps.includes(step.id)) {
+          wfState.completedSteps.push(step.id);
+          vfs.write(statePath, JSON.stringify(wfState, null, 2));
+          output.write(c('gray', `  (checkpoint updated for step ${step.id})\n`));
+        }
+
+        output.write(c('green', `  ✓ [${step.id}] complete\n`));
+      }
+
+      output.write('\n' + c('green', `  ✅ Workflow "${wfName}" complete!`) + '\n\n');
       ui.hr();
       continue;
     }

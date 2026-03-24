@@ -38,6 +38,8 @@ ANTHROPIC_API_KEY=sk-ant-... node rsi-ui.mjs
 | `:cat /path` | Print file content |
 | `:rsi [budget]` | Run harness RSI experiment loop (default 5) |
 | `:skill [budget]` | Run skill RSI loop |
+| `:workflow` | List workflows in `/workflows/` |
+| `:workflow <name>` | Run or resume a named workflow (drives agent turn-by-turn) |
 | `:clear` | Reset conversation history (VFS persists) |
 | `:exit` | Quit |
 
@@ -73,6 +75,7 @@ context.vfs.list()                // → string[], sorted
 | `/scratch/` | Ephemeral planning scratchpad |
 | `/artifacts/` | Agent outputs (persisted to `artifacts/` on disk) |
 | `/skills/*/` | Skill definitions (agentskills.io standard) |
+| `/workflows/*/` | Workflow definitions (JSON, driven by `:workflow` command) |
 | `/program.md` | Human RSI steering instructions |
 
 ### RSI Loop

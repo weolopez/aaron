@@ -31,6 +31,26 @@
   --display:  'Syne', sans-serif;
 }
 
+html.light {
+  --bg:       #f5f4f0;
+  --bg2:      #edece7;
+  --bg3:      #e4e3de;
+  --bg4:      #d8d7d1;
+  --border:   #cccbc3;
+  --border2:  #b5b4ac;
+  --text:     #28271f;
+  --dim:      #7a7870;
+  --dim2:     #5e5d55;
+  --amber:    #b86c10;
+  --amber-lo: rgba(184,108,16,0.09);
+  --amber-brd:rgba(184,108,16,0.28);
+  --cyan:     #1a8f74;
+  --cyan-lo:  rgba(26,143,116,0.07);
+  --cyan-brd: rgba(26,143,116,0.25);
+  --red:      #b83030;
+  --blue:     #2d5aaa;
+}
+
 html, body {
   height: 100%;
   overflow: hidden;
@@ -589,6 +609,22 @@ textarea#input::placeholder { color: var(--dim); }
 .preview-toggle:hover { color: var(--text); border-color: var(--amber-brd); }
 .preview-toggle.active { color: var(--cyan); border-color: var(--cyan-brd); }
 
+.theme-toggle {
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  border-radius: 3px;
+  color: var(--dim2);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.09em;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  flex-shrink: 0;
+}
+.theme-toggle:hover { color: var(--text); border-color: var(--amber-brd); }
+
 /* ── GITHUB CONFIG ─────────────────────────────── */
 .gh-bar {
   display: flex; align-items: center; gap: 8px;
@@ -602,10 +638,11 @@ textarea#input::placeholder { color: var(--dim); }
   color: var(--text); padding: 3px 8px; font-size: 11px; font-family: inherit;
 }
 .gh-bar input::placeholder { color: var(--dim); }
+.gh-bar .gh-apikey { width: 200px; }
 .gh-bar .gh-repo  { width: 180px; }
 .gh-bar .gh-token { width: 140px; }
 .gh-bar button {
-  background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+  background: var(--bg3); border: 1px solid var(--border); border-radius: 4px;
   color: var(--dim); padding: 3px 10px; font-size: 11px; cursor: pointer; font-family: inherit;
 }
 .gh-bar button:hover { color: var(--text); border-color: var(--cyan-brd); }
@@ -619,12 +656,17 @@ textarea#input::placeholder { color: var(--dim); }
   <header>
     <div class="logo">agent<em>/harness</em></div>
     <div class="header-sep"></div>
+    <button class="theme-toggle" id="theme-toggle" title="Toggle light/dark mode">light</button>
     <button class="preview-toggle" id="preview-toggle" title="Toggle preview panel">preview</button>
     <div class="status-chip" id="status">idle</div>
     <div class="turn-counter" id="turn-counter">turn 0</div>
   </header>
 
   <div class="gh-bar">
+    <span style="color:var(--dim);">Anthropic</span>
+    <input class="gh-apikey" id="api-key" type="password" placeholder="sk-ant-… API key" />
+    <button id="api-key-set">set key</button>
+    <span style="color:var(--border2);margin:0 4px;">│</span>
     <span style="color:var(--dim);">GitHub</span>
     <input class="gh-repo" id="gh-repo" placeholder="owner/repo@ref" />
     <input class="gh-token" id="gh-token" type="password" placeholder="token" />
@@ -693,7 +735,18 @@ import { createGitHubClient, initFromGitHub, commitToGitHub } from './github.js'
 // ════════════════════════════════════════════════════
 
 const MODEL = 'claude-sonnet-4-20250514';
-const llm = createLLMClient({ model: MODEL });
+
+// ── API KEY (browser only — scoped to Anthropic requests only) ──
+function makeLLM(apiKey) {
+  const headers = apiKey ? {
+    'x-api-key': apiKey,
+    'anthropic-version': '2023-06-01',
+    'anthropic-dangerous-direct-browser-access': 'true',
+  } : {};
+  return createLLMClient({ model: MODEL, headers });
+}
+
+let llm = makeLLM(localStorage.getItem('aaron-apikey') || '');
 
 // ════════════════════════════════════════════════════
 // UI
@@ -962,6 +1015,26 @@ async function hydrateHarness(vfs) {
 
 const vfs = createVFS();
 
+// ── API key UI ──
+const apiKeyInput  = document.getElementById('api-key');
+const apiKeySetBtn = document.getElementById('api-key-set');
+
+// Restore saved API key
+const savedApiKey = localStorage.getItem('aaron-apikey') || '';
+if (savedApiKey) apiKeyInput.value = savedApiKey;
+
+function applyApiKey() {
+  const key = apiKeyInput.value.trim();
+  if (!key) return;
+  localStorage.setItem('aaron-apikey', key);
+  llm = makeLLM(key);
+  deps.llm = llm;
+  ui.addSysMsg('API key set.');
+}
+
+apiKeySetBtn.addEventListener('click', applyApiKey);
+apiKeyInput.addEventListener('keydown', e => { if (e.key === 'Enter') applyApiKey(); });
+
 // ── GitHub state ──
 let ghClient = null;
 let ghConfig = null;
@@ -1051,14 +1124,17 @@ const agentState = {
     github: null,
     async commit(message = 'commit') {
       const dirty = vfs.list().filter(p => vfs.isDirty(p));
-      // Push /src/ files to GitHub if connected
+      // Push to GitHub if connected — /src/, /workflows/, /artifacts/, /memory/, /scratch/
       if (ghClient && ghConfig) {
-        const srcDirty = dirty.filter(p => p.startsWith('/src/'));
-        if (srcDirty.length > 0) {
+        const ghPrefixes = ['/src/', '/workflows/', '/artifacts/', '/memory/', '/scratch/'];
+        const ghDirty = dirty.filter(p => ghPrefixes.some(prefix => p.startsWith(prefix)));
+        for (const prefix of ghPrefixes) {
+          const prefixDirty = ghDirty.filter(p => p.startsWith(prefix));
+          if (prefixDirty.length === 0) continue;
           try {
             await commitToGitHub(vfs, ghClient, {
               owner: ghConfig.owner, repo: ghConfig.repo,
-              branch: ghConfig.ref, message, pathPrefix: '/src/',
+              branch: ghConfig.ref, message, pathPrefix: prefix,
             }, (ev) => agentState.context.emit(ev));
           } catch { /* commitToGitHub logs via emit */ }
         }
@@ -1071,6 +1147,7 @@ const agentState = {
 };
 
 const deps = { llm, execute, extractCode, ui };
+// llm is reassigned when API key is set — applyApiKey() updates deps.llm directly
 
 // Hydrate harness files into VFS
 hydrateHarness(vfs).then(() => {
@@ -1081,24 +1158,120 @@ hydrateHarness(vfs).then(() => {
   const extra = count > 0 ? `\n${count} file(s) loaded from disk.` : '';
   ui.addSysMsg(
     'Harness ready.' + extra + '\n\n' +
-    'Try: "Write a fibonacci function, test the first 10 values, and save the results to /artifacts/fib.md"'
+    'Commands: :vfs  :cat /path  :workflow [name]\n' +
+    'Try: "create a workflow called my-app to build a todo list app" then ":workflow my-app"'
   );
 });
 
 // Send
-sendBtn.addEventListener('click', async () => {
+async function handleSend() {
   const msg = inputEl.value.trim();
   if (!msg || sendBtn.disabled) return;
   inputEl.value = '';
   inputEl.style.height = 'auto';
+
+  // ── Built-in commands ─────────────────────────────
+  if (msg === ':vfs') {
+    const paths = vfs.list();
+    if (paths.length === 0) { ui.addSysMsg('VFS is empty.'); return; }
+    const lines = paths.map(p => {
+      const size = vfs.size ? vfs.size(p) : (vfs.read(p) || '').length;
+      const dirty = vfs.isDirty(p) ? ' *' : '';
+      return `${p}  ${size}b${dirty}`;
+    });
+    ui.addSysMsg('VFS contents:\n' + lines.join('\n'));
+    return;
+  }
+
+  if (msg.startsWith(':cat ')) {
+    const path = msg.slice(5).trim();
+    const content = vfs.read(path);
+    if (content === null) { ui.addSysMsg(`Not found: ${path}`); return; }
+    ui.addSysMsg(`${path}:\n\n${content}`);
+    return;
+  }
+
+  if (msg === ':workflow' || msg.startsWith(':workflow ')) {
+    const wfName = msg.slice(10).trim();
+    if (!wfName) {
+      const wfPaths = vfs.list().filter(p => p.startsWith('/workflows/') && p.endsWith('.json'));
+      if (wfPaths.length === 0) {
+        ui.addSysMsg('No workflows in /workflows/\nAsk the agent: "create a workflow called <name> to <goal>"');
+      } else {
+        const stateRaw = vfs.read('/scratch/workflow-state.json');
+        const wfState = stateRaw ? (() => { try { return JSON.parse(stateRaw); } catch { return null; } })() : null;
+        const lines = wfPaths.map(p => {
+          try {
+            const wf = JSON.parse(vfs.read(p));
+            const active = wfState?.workflow === wf.name;
+            const done = active && wfState?.completedSteps?.length === wf.steps?.length;
+            const status = active ? (done ? '✓ complete' : `step: ${wfState.currentStep}`) : 'not started';
+            return `${wf.name}  [${status}]${wf.description ? '\n  ' + wf.description : ''}`;
+          } catch { return p; }
+        });
+        ui.addSysMsg('Workflows:\n' + lines.join('\n\n') + '\n\nType ":workflow <name>" to run.');
+      }
+      return;
+    }
+
+    const wfPath = `/workflows/${wfName}.json`;
+    const wfRaw = vfs.read(wfPath);
+    if (!wfRaw) {
+      ui.addSysMsg(`Workflow not found: ${wfPath}\nAsk the agent to create it first.`);
+      return;
+    }
+    let wf;
+    try { wf = JSON.parse(wfRaw); } catch { ui.addSysMsg(`Invalid workflow JSON: ${wfPath}`); return; }
+
+    const statePath = '/scratch/workflow-state.json';
+    let wfState = (() => { try { return JSON.parse(vfs.read(statePath) || 'null'); } catch { return null; } })();
+    if (!wfState || wfState.workflow !== wfName) {
+      wfState = { workflow: wfName, startedAt: new Date().toISOString(), completedSteps: [], currentStep: null, outputs: {} };
+      vfs.write(statePath, JSON.stringify(wfState, null, 2));
+    }
+
+    const doneSteps = wfState.completedSteps.length;
+    ui.addSysMsg(`Workflow: ${wfName} (${doneSteps}/${wf.steps.length} steps done). Running steps…`);
+
+    for (const step of wf.steps) {
+      if (wfState.completedSteps.includes(step.id)) continue;
+
+      wfState.currentStep = step.id;
+      vfs.write(statePath, JSON.stringify(wfState, null, 2));
+
+      let turnPrompt = step.prompt;
+      if (step.skill && vfs.read(`/skills/${step.skill}/SKILL.md`)) {
+        turnPrompt = `Use the "${step.skill}" skill for this step.\n\n${step.prompt}`;
+      }
+      turnPrompt += `\n\nAfter completing this step:\n1. Update /scratch/workflow-state.json: add "${step.id}" to completedSteps, set outputs["${step.id}"] to a brief result summary.\n2. Call await context.commit('workflow: ${wfName} — step ${step.id} complete').\n3. context.emit({ type: 'done', message: 'Step ${step.id} complete' })`;
+
+      ui.addUserMsg(`[${step.id}] ${step.prompt.slice(0, 80)}${step.prompt.length > 80 ? '…' : ''}`);
+      await runTurn(turnPrompt, agentState, deps);
+
+      // Refresh state from VFS (agent may have updated it)
+      const updated = (() => { try { return JSON.parse(vfs.read(statePath) || 'null'); } catch { return null; } })();
+      if (updated) wfState = updated;
+      if (!wfState.completedSteps.includes(step.id)) {
+        wfState.completedSteps.push(step.id);
+        vfs.write(statePath, JSON.stringify(wfState, null, 2));
+      }
+    }
+
+    ui.addSysMsg(`✅ Workflow "${wfName}" complete!`);
+    return;
+  }
+
+  // ── Normal agent turn ─────────────────────────────
   ui.addUserMsg(msg);
   await runTurn(msg, agentState, deps);
-});
+}
+
+sendBtn.addEventListener('click', handleSend);
 
 // Keyboard shortcut
 inputEl.addEventListener('keydown', e => {
   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-    sendBtn.click();
+    handleSend();
   }
 });
 
@@ -1114,6 +1287,7 @@ inputEl.addEventListener('input', () => {
 
 const mainEl         = document.querySelector('main');
 const previewToggle  = document.getElementById('preview-toggle');
+const themeToggleBtn = document.getElementById('theme-toggle');
 const previewSelect  = document.getElementById('preview-select');
 const previewRender  = document.getElementById('preview-render');
 const previewSrc     = document.getElementById('preview-src');
@@ -1121,6 +1295,24 @@ const previewFrame   = document.getElementById('preview-frame');
 const previewEmpty   = document.getElementById('preview-empty');
 
 let showSource = false;
+
+// ── THEME ──────────────────────────────────────────
+function applyTheme(light) {
+  document.documentElement.classList.toggle('light', light);
+  themeToggleBtn.textContent = light ? 'dark' : 'light';
+  localStorage.setItem('aaron-theme', light ? 'light' : 'dark');
+  if (showSource) renderPreview(); // re-render src view with new colors
+}
+
+const savedTheme = localStorage.getItem('aaron-theme');
+const preferLight = savedTheme
+  ? savedTheme === 'light'
+  : window.matchMedia('(prefers-color-scheme: light)').matches;
+applyTheme(preferLight);
+
+themeToggleBtn.addEventListener('click', () => {
+  applyTheme(!document.documentElement.classList.contains('light'));
+});
 
 // Toggle preview panel visibility
 previewToggle.addEventListener('click', () => {
@@ -1317,12 +1509,15 @@ function renderPreview() {
   previewFrame.style.display = 'block';
 
   if (showSource) {
-    // Show raw source in the iframe
+    // Show raw source in the iframe — respect current theme
+    const isLight = document.documentElement.classList.contains('light');
+    const srcBg   = isLight ? '#edece7' : '#0f0f12';
+    const srcFg   = isLight ? '#28271f' : '#c4c0b8';
     const escaped = content
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const srcHTML = `<!DOCTYPE html>
 <html><head><style>
-  body { background: #0f0f12; color: #c4c0b8; font-family: 'JetBrains Mono', monospace; font-size: 12px; padding: 16px; margin: 0; }
+  body { background: ${srcBg}; color: ${srcFg}; font-family: 'JetBrains Mono', monospace; font-size: 12px; padding: 16px; margin: 0; }
   pre { white-space: pre-wrap; word-break: break-word; line-height: 1.75; }
 </style></head><body><pre>${escaped}</pre></body></html>`;
     previewFrame.srcdoc = srcHTML;
