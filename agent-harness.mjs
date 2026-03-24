@@ -17,6 +17,24 @@ import { stdin as input, stdout as output, env } from 'node:process';
 import { createVFS, execute, createLLMClient, extractCode } from './agent-core.js';
 import { runTurn, buildSkillIndex } from './agent-loop.js';
 import { runRSI, runSkillRSI } from './agent-rsi.js';
+import { createGitHubClient, initFromGitHub, commitToGitHub } from './github.js';
+
+// ════════════════════════════════════════════════════
+// .env loader (zero deps)
+// ════════════════════════════════════════════════════
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const envPath = join(__dirname, '.env');
+if (existsSync(envPath)) {
+  for (const line of readFileSync(envPath, 'utf-8').split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq === -1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const val = trimmed.slice(eq + 1).trim();
+    if (!env[key]) env[key] = val;   // don't override explicit env vars
+  }
+}
 
 // ════════════════════════════════════════════════════
 // ANSI
@@ -43,6 +61,8 @@ const c = (color, str) => `${A[color]}${str}${A.reset}`;
 
 const MODEL = 'claude-haiku-4-5';
 const API_KEY = env.ANTHROPIC_API_KEY ?? '';
+const GITHUB_TOKEN = env.GITHUB_TOKEN ?? '';
+const GITHUB_REPO  = env.GITHUB_REPO ?? '';   // "owner/repo" or "owner/repo@ref"
 
 const llm = createLLMClient({
   model: MODEL,
@@ -51,6 +71,20 @@ const llm = createLLMClient({
     'anthropic-version': '2023-06-01',
   },
 });
+
+// GitHub client (created only when GITHUB_TOKEN is set)
+function parseGitHubRepo(repoStr) {
+  if (!repoStr) return null;
+  const [ownerRepo, ref] = repoStr.split('@');
+  const [owner, repo] = ownerRepo.split('/');
+  if (!owner || !repo) return null;
+  return { owner, repo, ref: ref || 'main' };
+}
+
+const ghConfig = parseGitHubRepo(GITHUB_REPO);
+const ghClient = GITHUB_TOKEN && ghConfig
+  ? createGitHubClient({ token: GITHUB_TOKEN })
+  : null;
 
 // ════════════════════════════════════════════════════
 // CLI UI (implements UI adapter for runTurn)
@@ -172,8 +206,6 @@ const ui = {
 // ════════════════════════════════════════════════════
 // VFS HYDRATION (load harness code into VFS for RSI)
 // ════════════════════════════════════════════════════
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 function hydrateHarness(vfs) {
   // Load harness source files
@@ -297,6 +329,17 @@ async function repl() {
   hydrateHarness(vfs);
   writeManifest();
 
+  // GitHub hydration (if configured)
+  if (ghClient && ghConfig) {
+    output.write(c('cyan', `  github`) + c('gray', ` → ${ghConfig.owner}/${ghConfig.repo}@${ghConfig.ref}\n`));
+    try {
+      const result = await initFromGitHub(ghConfig, vfs, ghClient, (ev) => ui.emitEvent(ev));
+      output.write(c('green', `  ✓ `) + c('gray', `${result.files} files hydrated from GitHub`) + '\n');
+    } catch (e) {
+      output.write(c('red', `  ✕ GitHub hydration failed: ${e.message}\n`));
+    }
+  }
+
   const skillIndex = buildSkillIndex(vfs);
 
   const context = {
@@ -305,10 +348,26 @@ async function repl() {
     emit:  (ev) => ui.emitEvent(ev),
     env:   {},
     skillIndex,
+    github: ghClient ? { owner: ghConfig.owner, repo: ghConfig.repo, ref: ghConfig.ref } : null,
     async commit(message = 'commit') {
       const dirty = vfs.list().filter(p => vfs.isDirty(p));
+      // Always flush to disk
       const written = flushToDisk(vfs, dirty);
       writeManifest();
+      // Also push to GitHub if connected and /src/ files are dirty
+      if (ghClient && ghConfig) {
+        const srcDirty = dirty.filter(p => p.startsWith('/src/'));
+        if (srcDirty.length > 0) {
+          try {
+            await commitToGitHub(vfs, ghClient, {
+              owner: ghConfig.owner, repo: ghConfig.repo,
+              branch: ghConfig.ref, message, pathPrefix: '/src/',
+            }, (ev) => context.emit(ev));
+          } catch (e) {
+            context.emit({ type: 'progress', message: `GitHub push failed: ${e.message}` });
+          }
+        }
+      }
       for (const p of dirty) vfs.markClean(p);
       context.emit({ type: 'experiment', id: String(Date.now()), kept: true, reason: message });
       if (written.length > 0) {
@@ -376,6 +435,42 @@ async function repl() {
     if (msg === ':clear') {
       state.history = [];
       output.write(c('gray', '  history cleared\n'));
+      continue;
+    }
+
+    if (msg === ':github') {
+      if (!ghClient || !ghConfig) {
+        output.write(c('gray', '  GitHub not configured.\n'));
+        output.write(c('gray', '  Set GITHUB_TOKEN and GITHUB_REPO="owner/repo" env vars.\n'));
+      } else {
+        output.write('\n' + c('cyan', '  GitHub status') + '\n');
+        output.write(c('gray', `  repo:   ${ghConfig.owner}/${ghConfig.repo}\n`));
+        output.write(c('gray', `  ref:    ${ghConfig.ref}\n`));
+        const srcFiles = vfs.list().filter(p => p.startsWith('/src/'));
+        const srcDirty = srcFiles.filter(p => vfs.isDirty(p));
+        output.write(c('gray', `  files:  ${srcFiles.length} in /src/ (${srcDirty.length} dirty)\n`));
+      }
+      continue;
+    }
+
+    if (msg === ':push' || msg.startsWith(':push ')) {
+      if (!ghClient || !ghConfig) {
+        output.write(c('red', '  GitHub not configured. Set GITHUB_TOKEN and GITHUB_REPO.\n'));
+        continue;
+      }
+      const pushMsg = msg.slice(5).trim() || 'Update from Aaron';
+      try {
+        const result = await commitToGitHub(vfs, ghClient, {
+          owner: ghConfig.owner, repo: ghConfig.repo,
+          branch: ghConfig.ref, message: pushMsg, pathPrefix: '/src/',
+        }, (ev) => ui.emitEvent(ev));
+        output.write(c('green', `  ✓ `) + c('gray', `pushed ${result.pushed.length} file(s)`) + '\n');
+        if (result.conflicts.length > 0) {
+          output.write(c('red', `  ✕ ${result.conflicts.length} conflict(s)`) + '\n');
+        }
+      } catch (e) {
+        output.write(c('red', `  push failed: ${e.message}\n`));
+      }
       continue;
     }
 
@@ -548,10 +643,22 @@ function createRunContext() {
     emit:  (ev) => ui.emitEvent(ev),
     env:   {},
     skillIndex,
+    github: ghClient ? { owner: ghConfig.owner, repo: ghConfig.repo, ref: ghConfig.ref } : null,
     async commit(message = 'commit') {
       const dirty = vfs.list().filter(p => vfs.isDirty(p));
       const written = flushToDisk(vfs, dirty);
       writeManifest();
+      if (ghClient && ghConfig) {
+        const srcDirty = dirty.filter(p => p.startsWith('/src/'));
+        if (srcDirty.length > 0) {
+          try {
+            await commitToGitHub(vfs, ghClient, {
+              owner: ghConfig.owner, repo: ghConfig.repo,
+              branch: ghConfig.ref, message, pathPrefix: '/src/',
+            }, (ev) => context.emit(ev));
+          } catch { /* logged by commitToGitHub */ }
+        }
+      }
       for (const p of dirty) vfs.markClean(p);
       if (written.length > 0) {
         context.emit({ type: 'progress', message: `flushed ${written.length} files to disk` });

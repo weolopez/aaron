@@ -18,6 +18,7 @@
  */
 
 import { buildSkillIndex } from './agent-loop.js';
+import { createGitHubClient, commitToGitHub } from './github.js';
 
 // ════════════════════════════════════════════════════
 // EVAL RUNNER
@@ -303,7 +304,26 @@ export async function runRSI({ evalPrompt, mutatePrompt, budget = 5, state, deps
   log = log ?? (() => {});
   const results = [];
 
-  log(`\n═══ RSI LOOP: ${budget} experiments ═══\n`);
+  // GitHub branch isolation: create RSI session branch if GitHub is configured
+  const gh = state.context.github;
+  let ghClient = null;
+  let rsiBranch = null;
+  if (gh && process.env?.GITHUB_TOKEN) {
+    ghClient = createGitHubClient({ token: process.env.GITHUB_TOKEN });
+    rsiBranch = `rsi/${Date.now()}`;
+    try {
+      const ref = await ghClient.getBranch(gh.owner, gh.repo, gh.ref || 'main');
+      if (ref) {
+        await ghClient.createBranch(gh.owner, gh.repo, rsiBranch, ref.sha);
+        log(`GitHub branch created: ${rsiBranch}`);
+      }
+    } catch (e) {
+      log(`GitHub branch creation failed: ${e.message} — continuing without branch isolation`);
+      rsiBranch = null;
+    }
+  }
+
+  log(`\n═══ RSI LOOP: ${budget} experiments${rsiBranch ? ` → ${rsiBranch}` : ''} ═══\n`);
 
   for (let i = 0; i < budget; i++) {
     log(`\n─── experiment ${i + 1}/${budget} ───\n`);
@@ -316,7 +336,7 @@ export async function runRSI({ evalPrompt, mutatePrompt, budget = 5, state, deps
     log(`\nrunning total: ${kept} kept, ${discarded} discarded`);
   }
 
-  log(`\n═══ RSI COMPLETE: ${results.filter(r => r.kept).length}/${results.length} experiments kept ═══\n`);
+  log(`\n═══ RSI COMPLETE: ${results.filter(r => r.kept).length}/${results.length} experiments kept${rsiBranch ? ` (branch: ${rsiBranch})` : ''} ═══\n`);
 
   return results;
 }
@@ -516,7 +536,26 @@ export async function runSkillRSI({ evalPrompt, skillName, mutatePrompt, budget 
   log = log ?? (() => {});
   const results = [];
 
-  log(`\n═══ SKILL RSI: ${skillName} — ${budget} experiments ═══\n`);
+  // GitHub branch isolation for skill RSI
+  const gh = state.context.github;
+  let ghClient = null;
+  let rsiBranch = null;
+  if (gh && process.env?.GITHUB_TOKEN) {
+    ghClient = createGitHubClient({ token: process.env.GITHUB_TOKEN });
+    rsiBranch = `rsi/skill-${skillName}-${Date.now()}`;
+    try {
+      const ref = await ghClient.getBranch(gh.owner, gh.repo, gh.ref || 'main');
+      if (ref) {
+        await ghClient.createBranch(gh.owner, gh.repo, rsiBranch, ref.sha);
+        log(`GitHub branch created: ${rsiBranch}`);
+      }
+    } catch (e) {
+      log(`GitHub branch creation failed: ${e.message} — continuing without branch isolation`);
+      rsiBranch = null;
+    }
+  }
+
+  log(`\n═══ SKILL RSI: ${skillName} — ${budget} experiments${rsiBranch ? ` → ${rsiBranch}` : ''} ═══\n`);
 
   for (let i = 0; i < budget; i++) {
     log(`\n─── experiment ${i + 1}/${budget} ───\n`);
@@ -529,7 +568,7 @@ export async function runSkillRSI({ evalPrompt, skillName, mutatePrompt, budget 
     log(`\nrunning total: ${kept} kept, ${discarded} discarded`);
   }
 
-  log(`\n═══ SKILL RSI COMPLETE: ${results.filter(r => r.kept).length}/${results.length} experiments kept ═══\n`);
+  log(`\n═══ SKILL RSI COMPLETE: ${results.filter(r => r.kept).length}/${results.length} experiments kept${rsiBranch ? ` (branch: ${rsiBranch})` : ''} ═══\n`);
 
   return results;
 }

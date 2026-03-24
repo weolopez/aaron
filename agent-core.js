@@ -46,6 +46,10 @@ export function createVFS() {
       const f = files.get(path);
       if (f) f.dirty = false;
     },
+    setSHA(path, sha) {
+      const f = files.get(path);
+      if (f) f.sha = sha;
+    },
     delete(path) {
       return files.delete(path);
     },

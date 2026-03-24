@@ -45,7 +45,7 @@ html, body {
 /* ── LAYOUT ─────────────────────────────────────── */
 #app {
   display: grid;
-  grid-template-rows: 42px 1fr;
+  grid-template-rows: 42px auto 1fr;
   height: 100vh;
 }
 
@@ -588,6 +588,29 @@ textarea#input::placeholder { color: var(--dim); }
 }
 .preview-toggle:hover { color: var(--text); border-color: var(--amber-brd); }
 .preview-toggle.active { color: var(--cyan); border-color: var(--cyan-brd); }
+
+/* ── GITHUB CONFIG ─────────────────────────────── */
+.gh-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 12px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+.gh-bar input {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+  color: var(--text); padding: 3px 8px; font-size: 11px; font-family: inherit;
+}
+.gh-bar input::placeholder { color: var(--dim); }
+.gh-bar .gh-repo  { width: 180px; }
+.gh-bar .gh-token { width: 140px; }
+.gh-bar button {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+  color: var(--dim); padding: 3px 10px; font-size: 11px; cursor: pointer; font-family: inherit;
+}
+.gh-bar button:hover { color: var(--text); border-color: var(--cyan-brd); }
+.gh-bar .gh-status { color: var(--dim); margin-left: auto; }
+.gh-bar .gh-status.connected { color: var(--green, #7ec); }
 </style>
 </head>
 <body>
@@ -600,6 +623,15 @@ textarea#input::placeholder { color: var(--dim); }
     <div class="status-chip" id="status">idle</div>
     <div class="turn-counter" id="turn-counter">turn 0</div>
   </header>
+
+  <div class="gh-bar">
+    <span style="color:var(--dim);">GitHub</span>
+    <input class="gh-repo" id="gh-repo" placeholder="owner/repo@ref" />
+    <input class="gh-token" id="gh-token" type="password" placeholder="token" />
+    <button id="gh-connect">connect</button>
+    <button id="gh-push" disabled>push</button>
+    <span class="gh-status" id="gh-status">disconnected</span>
+  </div>
 
   <main>
     <!-- LEFT: conversation -->
@@ -654,6 +686,7 @@ textarea#input::placeholder { color: var(--dim); }
 
 import { createVFS, execute, createLLMClient, extractCode } from './agent-core.js';
 import { runTurn, buildSkillIndex } from './agent-loop.js';
+import { createGitHubClient, initFromGitHub, commitToGitHub } from './github.js';
 
 // ════════════════════════════════════════════════════
 // CONFIG
@@ -929,6 +962,84 @@ async function hydrateHarness(vfs) {
 
 const vfs = createVFS();
 
+// ── GitHub state ──
+let ghClient = null;
+let ghConfig = null;
+const ghRepoInput  = document.getElementById('gh-repo');
+const ghTokenInput = document.getElementById('gh-token');
+const ghConnectBtn = document.getElementById('gh-connect');
+const ghPushBtn    = document.getElementById('gh-push');
+const ghStatusEl   = document.getElementById('gh-status');
+
+// Restore saved GitHub settings from localStorage
+try {
+  const saved = JSON.parse(localStorage.getItem('aaron-github') || 'null');
+  if (saved) {
+    ghRepoInput.value = saved.repo || '';
+    ghTokenInput.value = saved.token || '';
+  }
+} catch { /* ignore */ }
+
+function parseGitHubRepo(repoStr) {
+  if (!repoStr) return null;
+  const [ownerRepo, ref] = repoStr.split('@');
+  const [owner, repo] = ownerRepo.split('/');
+  if (!owner || !repo) return null;
+  return { owner, repo, ref: ref || 'main' };
+}
+
+async function ghConnect() {
+  const repoStr = ghRepoInput.value.trim();
+  const token = ghTokenInput.value.trim();
+  if (!repoStr || !token) {
+    ui.addSysMsg('GitHub: enter owner/repo and token to connect.');
+    return;
+  }
+  const cfg = parseGitHubRepo(repoStr);
+  if (!cfg) {
+    ui.addSysMsg('GitHub: invalid repo format. Use "owner/repo" or "owner/repo@ref".');
+    return;
+  }
+  ghConfig = cfg;
+  ghClient = createGitHubClient({ token });
+  // Persist to localStorage (token in localStorage only)
+  localStorage.setItem('aaron-github', JSON.stringify({ repo: repoStr, token }));
+  ghStatusEl.textContent = `connecting to ${cfg.owner}/${cfg.repo}...`;
+
+  try {
+    const result = await initFromGitHub(cfg, vfs, ghClient, (ev) => ui.emitEvent(ev));
+    ghStatusEl.textContent = `${cfg.owner}/${cfg.repo}@${cfg.ref} (${result.files} files)`;
+    ghStatusEl.classList.add('connected');
+    ghPushBtn.disabled = false;
+    agentState.context.github = { owner: cfg.owner, repo: cfg.repo, ref: cfg.ref };
+    ui.refreshVFS(vfs);
+    ui.addSysMsg(`GitHub connected: ${result.files} files loaded from ${cfg.owner}/${cfg.repo}@${cfg.ref}`);
+  } catch (e) {
+    ghStatusEl.textContent = `error: ${e.message}`;
+    ghStatusEl.classList.remove('connected');
+    ghClient = null;
+    ghConfig = null;
+    ui.addSysMsg(`GitHub connection failed: ${e.message}`);
+  }
+}
+
+async function ghPush() {
+  if (!ghClient || !ghConfig) return;
+  try {
+    const result = await commitToGitHub(vfs, ghClient, {
+      owner: ghConfig.owner, repo: ghConfig.repo,
+      branch: ghConfig.ref, message: 'Update from Aaron (browser)',
+      pathPrefix: '/src/',
+    }, (ev) => ui.emitEvent(ev));
+    ui.addSysMsg(`Pushed ${result.pushed.length} file(s) to GitHub.${result.conflicts.length ? ` ${result.conflicts.length} conflict(s).` : ''}`);
+  } catch (e) {
+    ui.addSysMsg(`GitHub push failed: ${e.message}`);
+  }
+}
+
+ghConnectBtn.addEventListener('click', ghConnect);
+ghPushBtn.addEventListener('click', ghPush);
+
 const agentState = {
   history: [],
   turn: 0,
@@ -937,8 +1048,21 @@ const agentState = {
     fetch: (...args) => fetch(...args),
     emit: (ev) => ui.emitEvent(ev),
     env: {},
+    github: null,
     async commit(message = 'commit') {
       const dirty = vfs.list().filter(p => vfs.isDirty(p));
+      // Push /src/ files to GitHub if connected
+      if (ghClient && ghConfig) {
+        const srcDirty = dirty.filter(p => p.startsWith('/src/'));
+        if (srcDirty.length > 0) {
+          try {
+            await commitToGitHub(vfs, ghClient, {
+              owner: ghConfig.owner, repo: ghConfig.repo,
+              branch: ghConfig.ref, message, pathPrefix: '/src/',
+            }, (ev) => agentState.context.emit(ev));
+          } catch { /* commitToGitHub logs via emit */ }
+        }
+      }
       for (const p of dirty) vfs.markClean(p);
       agentState.context.emit({ type: 'experiment', id: String(Date.now()), kept: true, reason: message });
       return dirty;
