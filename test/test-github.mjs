@@ -5,8 +5,8 @@
  * using mock HTTP responses (no real API calls).
  */
 
-import { createVFS } from './agent-core.js';
-import { createGitHubClient, initFromGitHub, commitToGitHub } from './github.js';
+import { createVFS } from '../src/agent-core.js';
+import { createGitHubClient, initFromGitHub, commitToGitHub } from '../src/github.js';
 
 let passed = 0;
 let failed = 0;

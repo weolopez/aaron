@@ -14,10 +14,10 @@ import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync } from 
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stdin as input, stdout as output, env } from 'node:process';
-import { createVFS, execute, createLLMClient, extractCode } from './agent-core.js';
-import { runTurn, buildSkillIndex } from './agent-loop.js';
-import { runRSI, runSkillRSI } from './agent-rsi.js';
-import { createGitHubClient, initFromGitHub, commitToGitHub } from './github.js';
+import { createVFS, execute, createLLMClient, extractCode } from './src/agent-core.js';
+import { runTurn, buildSkillIndex } from './src/agent-loop.js';
+import { runRSI, runSkillRSI } from './src/agent-rsi.js';
+import { createGitHubClient, initFromGitHub, commitToGitHub } from './src/github.js';
 
 // ════════════════════════════════════════════════════
 // .env loader (zero deps)
@@ -194,8 +194,10 @@ const ui = {
     output.write(c('gray', '  Commands:\n'));
     output.write(c('gray', '  :vfs            — list VFS contents\n'));
     output.write(c('gray', '  :cat /path      — show a file\n'));
-    output.write(c('gray', '  :workflow       — list workflows\n'));
-    output.write(c('gray', '  :workflow <name>— run or resume a workflow\n'));
+    output.write(c('gray', '  :workflow                         — list workflows\n'));
+    output.write(c('gray', '  :workflow create <name> <goal>    — create workflow definition\n'));
+    output.write(c('gray', '  :workflow improve <name> <feedback>— revise step prompts\n'));
+    output.write(c('gray', '  :workflow <name>                  — run or resume a workflow\n'));
     output.write(c('gray', '  :rsi            — run RSI experiment loop\n'));
     output.write(c('gray', '  :skill          — run skill RSI experiment loop\n'));
     output.write(c('gray', '  :clear          — reset conversation history\n'));
@@ -210,14 +212,20 @@ const ui = {
 // ════════════════════════════════════════════════════
 
 function hydrateHarness(vfs) {
-  // Load harness source files
-  for (const f of ['agent-core.js', 'agent-loop.js', 'agent-rsi.js', 'agent-harness.mjs']) {
+  // Load harness source files from src/
+  for (const f of ['agent-core.js', 'agent-loop.js', 'agent-rsi.js']) {
     try {
-      const content = readFileSync(new URL(f, import.meta.url), 'utf8');
+      const content = readFileSync(join(__dirname, 'src', f), 'utf8');
       vfs.write(`/harness/${f}`, content);
       vfs.markClean(`/harness/${f}`);
     } catch { /* file not found — skip */ }
   }
+  // Also load the CLI harness itself
+  try {
+    const content = readFileSync(join(__dirname, 'agent-harness.mjs'), 'utf8');
+    vfs.write('/harness/agent-harness.mjs', content);
+    vfs.markClean('/harness/agent-harness.mjs');
+  } catch { /* skip */ }
 
   // Load artifacts from disk
   const artifactsDir = join(__dirname, 'artifacts');
@@ -245,6 +253,9 @@ function hydrateHarness(vfs) {
 
   // Load skills from disk (recursive)
   loadDirToVFS(join(__dirname, 'skills'), '/skills/', vfs);
+
+  // Load workflows from disk
+  loadDirToVFS(join(__dirname, 'workflows'), '/workflows/', vfs);
 }
 
 /** Recursively load a directory tree into VFS. */
@@ -285,10 +296,11 @@ function writeManifest() {
 
 // VFS path → disk path mapping for commit
 const VFS_DISK_MAP = {
-  '/harness/': '',           // /harness/agent-loop.js → ./agent-loop.js
-  '/memory/':  'memory/',    // /memory/experiments.jsonl → ./memory/experiments.jsonl
+  '/harness/':   'src/',         // /harness/agent-loop.js → ./src/agent-loop.js
+  '/memory/':    'memory/',      // /memory/experiments.jsonl → ./memory/experiments.jsonl
   '/artifacts/': 'artifacts/',
-  '/skills/': 'skills/',
+  '/skills/':    'skills/',
+  '/workflows/': 'workflows/',
 };
 
 function vfsToDisk(vfsPath) {
@@ -491,6 +503,7 @@ async function repl() {
       if (!evalPrompt) { output.write(c('gray', '  cancelled\n')); continue; }
 
       const mutatePrompt = [
+        'CRITICAL: The file you write MUST be valid ESM. Never use require(), module.exports, or any CommonJS syntax. All exports must use the export keyword. Backticks inside template literals must be escaped as \\`.',
         'Read /harness/agent-loop.js — this is your own harness code.',
         'Analyze the SYSTEM prompt and the runTurn function.',
         'Propose ONE targeted improvement that could help the agent complete tasks more reliably (fewer errors, fewer retries, clearer instructions).',
@@ -612,14 +625,14 @@ async function repl() {
     }
 
     if (msg === ':workflow' || msg.startsWith(':workflow ')) {
-      const wfName = msg.slice(10).trim();
+      const args = msg.slice(10).trim();
 
-      if (!wfName) {
-        // List available workflows
+      // ── :workflow (list) ──
+      if (!args || args === 'list') {
         const wfPaths = vfs.list().filter(p => p.startsWith('/workflows/') && p.endsWith('.json'));
         if (wfPaths.length === 0) {
-          output.write(c('gray', '  No workflows found in /workflows/\n'));
-          output.write(c('gray', '  Ask the agent: "create a workflow called <name> to <goal>"\n'));
+          output.write(c('gray', '  No workflows yet.\n'));
+          output.write(c('gray', '  Create one: :workflow create <name> <goal>\n'));
         } else {
           output.write('\n' + c('cyan', '  Workflows:') + '\n');
           for (const p of wfPaths) {
@@ -628,23 +641,95 @@ async function repl() {
               const stateRaw = vfs.read('/scratch/workflow-state.json');
               const wfState = stateRaw ? JSON.parse(stateRaw) : null;
               const active = wfState?.workflow === wf.name;
-              const done = wfState?.completedSteps?.length === wf.steps?.length;
+              const done = active && wfState?.completedSteps?.length === wf.steps?.length;
               const status = active ? (done ? c('green', 'complete') : c('amber', `step ${wfState.currentStep}`)) : c('gray', 'not started');
               output.write(c('gray', `    ${wf.name}`) + '  ' + status + '\n');
               if (wf.description) output.write(c('gray', `      ${wf.description}\n`));
             } catch { output.write(c('gray', `    ${p}\n`)); }
           }
+          output.write(c('gray', '\n  :workflow <name>                   — run\n'));
+          output.write(c('gray', '  :workflow create <name> <goal>     — create new\n'));
+          output.write(c('gray', '  :workflow improve <name> <feedback>— revise steps\n'));
         }
         output.write('\n');
         continue;
       }
 
-      // Run or resume named workflow
+      // ── :workflow create <name> <goal> ──
+      if (args.startsWith('create ')) {
+        const rest = args.slice(7).trim();
+        const spaceIdx = rest.indexOf(' ');
+        if (spaceIdx === -1) {
+          output.write(c('red', '  Usage: :workflow create <name> <goal description>\n'));
+          continue;
+        }
+        const wfName = rest.slice(0, spaceIdx);
+        const goal = rest.slice(spaceIdx + 1).trim();
+        const createPrompt = [
+          `Create a workflow definition for a task called "${wfName}".`,
+          `Goal: ${goal}`,
+          `Write the workflow as JSON to /workflows/${wfName}.json.`,
+          'The JSON must have: { "name": "' + wfName + '", "description": "...", "steps": [...] }',
+          'Each step: { "id": "step-name", "skill": null, "prompt": "..." }',
+          'Rules for writing step prompts:',
+          '- Each prompt must describe a COMPLETE, CONCRETE deliverable with exact file paths',
+          '- If the goal involves a web page, one step must write a complete self-contained HTML file',
+          '  (embed CSS and JavaScript inside the HTML — do not create separate .css / .js files)',
+          '- Each prompt must include the exact artifact path: write to /artifacts/' + wfName + '/<file>',
+          '- Use 3-5 focused steps',
+          'Do NOT execute the steps — only write the workflow definition file.',
+          `context.emit({ type: 'done', message: 'Workflow "${wfName}" created. Run it with :workflow ${wfName}' })`,
+        ].join('\n');
+        ui.user(`:workflow create ${wfName} ${goal}`);
+        await runTurn(createPrompt, state, deps);
+        continue;
+      }
+
+      // ── :workflow improve <name> <feedback> ──
+      if (args.startsWith('improve ')) {
+        const rest = args.slice(8).trim();
+        const spaceIdx = rest.indexOf(' ');
+        if (spaceIdx === -1) {
+          output.write(c('red', '  Usage: :workflow improve <name> <feedback>\n'));
+          continue;
+        }
+        const wfName = rest.slice(0, spaceIdx);
+        const feedback = rest.slice(spaceIdx + 1).trim();
+        const wfPath = `/workflows/${wfName}.json`;
+        const wfRaw = vfs.read(wfPath);
+        if (!wfRaw) {
+          output.write(c('red', `  Workflow "${wfName}" not found.\n`));
+          output.write(c('gray', `  Create it first: :workflow create ${wfName} <goal>\n`));
+          continue;
+        }
+        const improvePrompt = [
+          `Read /workflows/${wfName}.json — this is the current workflow definition.`,
+          ``,
+          `User feedback: ${feedback}`,
+          ``,
+          `Revise the workflow definition to address this feedback:`,
+          `- Update step prompts to be more specific and produce complete, concrete deliverables`,
+          `- If the goal involves a web page, ensure one step writes a complete self-contained HTML file`,
+          `  (embed CSS and JavaScript inside the HTML — do not create separate .css / .js files)`,
+          `- Each step prompt must include the exact output path under /artifacts/${wfName}/<file>`,
+          `- Add new steps if needed, remove unnecessary ones, keep 3-6 steps total`,
+          ``,
+          `Write the revised version back to /workflows/${wfName}.json.`,
+          `Do NOT execute the steps — only revise the workflow definition file.`,
+          `context.emit({ type: 'done', message: 'Workflow "${wfName}" improved. Run it with :workflow ${wfName}' })`,
+        ].join('\n');
+        ui.user(`:workflow improve ${wfName} "${feedback}"`);
+        await runTurn(improvePrompt, state, deps);
+        continue;
+      }
+
+      // ── :workflow <name> — run or resume ──
+      const wfName = args;
       const wfPath = `/workflows/${wfName}.json`;
       const wfRaw = vfs.read(wfPath);
       if (!wfRaw) {
-        output.write(c('red', `  Workflow not found: ${wfPath}\n`));
-        output.write(c('gray', `  Ask the agent to create it first.\n`));
+        output.write(c('red', `  Workflow "${wfName}" not found.\n`));
+        output.write(c('gray', `  Create it: :workflow create ${wfName} <goal description>\n`));
         continue;
       }
 
@@ -913,6 +998,159 @@ async function skillRSI(name, evalTask, budget, mode) {
 }
 
 // ════════════════════════════════════════════════════
+// WORKFLOW CLI
+// ════════════════════════════════════════════════════
+
+function workflowUsage() {
+  output.write('\n' + c('amber', '  aaron workflow') + c('gray', ' — manage workflows\n\n'));
+  output.write(c('gray', '  Usage:\n'));
+  output.write(c('gray', '    aaron workflow list                            list defined workflows\n'));
+  output.write(c('gray', '    aaron workflow create <name> "goal"            define a new workflow\n'));
+  output.write(c('gray', '    aaron workflow improve <name> "feedback"       revise step prompts\n'));
+  output.write(c('gray', '    aaron workflow run <name>                      run or resume a workflow\n'));
+  output.write(c('gray', '    aaron :workflow <sub> ...                      colon prefix also works\n'));
+  output.write('\n');
+}
+
+async function workflowList() {
+  const vfs = createVFS();
+  hydrateHarness(vfs);
+
+  const wfPaths = vfs.list().filter(p => p.startsWith('/workflows/') && p.endsWith('.json'));
+  if (wfPaths.length === 0) {
+    output.write(c('gray', '  No workflows yet.\n'));
+    output.write(c('gray', '  Create one: aaron workflow create <name> "goal"\n'));
+    return;
+  }
+
+  output.write('\n' + c('cyan', '  Workflows:') + '\n\n');
+  for (const p of wfPaths) {
+    try {
+      const wf = JSON.parse(vfs.read(p));
+      const stateRaw = vfs.read('/scratch/workflow-state.json');
+      const wfState = stateRaw ? (() => { try { return JSON.parse(stateRaw); } catch { return null; } })() : null;
+      const active = wfState?.workflow === wf.name;
+      const done = active && wfState?.completedSteps?.length === wf.steps?.length;
+      const status = active ? (done ? c('green', 'complete') : c('amber', `step ${wfState.currentStep}`)) : c('gray', 'not started');
+      output.write(c('amber', `  ${wf.name}`) + '  ' + status + '\n');
+      if (wf.description) output.write(c('gray', `    ${wf.description}\n`));
+      if (wf.steps?.length) output.write(c('gray', `    ${wf.steps.length} step(s)\n`));
+    } catch { output.write(c('gray', `  ${p}\n`)); }
+  }
+  output.write('\n');
+}
+
+async function workflowCreate(wfName, goal) {
+  requireKey();
+  const { state, deps } = createRunContext();
+  const createPrompt = [
+    `Create a workflow definition for a task called "${wfName}".`,
+    `Goal: ${goal}`,
+    `Write the workflow as JSON to /workflows/${wfName}.json.`,
+    'The JSON must have: { "name": "' + wfName + '", "description": "...", "steps": [...] }',
+    'Each step: { "id": "step-name", "skill": null, "prompt": "..." }',
+    'Rules for writing step prompts:',
+    '- Each prompt must describe a COMPLETE, CONCRETE deliverable with exact file paths',
+    '- If the goal involves a web page, one step must write a complete self-contained HTML file',
+    '  (embed CSS and JavaScript inside the HTML — do not create separate .css / .js files)',
+    '- Each prompt must include the exact artifact path: write to /artifacts/' + wfName + '/<file>',
+    '- Use 3-5 focused steps',
+    'Do NOT execute the steps — only write the workflow definition file.',
+    `context.emit({ type: 'done', message: 'Workflow "${wfName}" created. Run it with: aaron workflow run ${wfName}' })`,
+  ].join('\n');
+  output.write('\n' + c('cyan', `  Creating workflow: ${wfName}`) + '\n\n');
+  await runTurn(createPrompt, state, deps);
+}
+
+async function workflowImprove(wfName, feedback) {
+  requireKey();
+  const { vfs, state, deps } = createRunContext();
+  const wfPath = `/workflows/${wfName}.json`;
+  const wfRaw = vfs.read(wfPath);
+  if (!wfRaw) {
+    output.write(c('red', `  Workflow "${wfName}" not found.\n`));
+    output.write(c('gray', `  Create it first: aaron workflow create ${wfName} "goal"\n`));
+    process.exit(1);
+  }
+  const improvePrompt = [
+    `Read /workflows/${wfName}.json — this is the current workflow definition.`,
+    ``,
+    `User feedback: ${feedback}`,
+    ``,
+    `Revise the workflow definition to address this feedback:`,
+    `- Update step prompts to be more specific and produce complete, concrete deliverables`,
+    `- If the goal involves a web page, ensure one step writes a complete self-contained HTML file`,
+    `  (embed CSS and JavaScript inside the HTML — do not create separate .css / .js files)`,
+    `- Each step prompt must include the exact output path under /artifacts/${wfName}/<file>`,
+    `- Add new steps if needed, remove unnecessary ones, keep 3-6 steps total`,
+    ``,
+    `Write the revised version back to /workflows/${wfName}.json.`,
+    `Do NOT execute the steps — only revise the workflow definition file.`,
+    `context.emit({ type: 'done', message: 'Workflow "${wfName}" improved. Run it with: aaron workflow run ${wfName}' })`,
+  ].join('\n');
+  output.write('\n' + c('cyan', `  Improving workflow: ${wfName}`) + '\n\n');
+  await runTurn(improvePrompt, state, deps);
+}
+
+async function workflowRun(wfName) {
+  requireKey();
+  const { vfs, state, deps } = createRunContext();
+  const wfPath = `/workflows/${wfName}.json`;
+  const wfRaw = vfs.read(wfPath);
+  if (!wfRaw) {
+    output.write(c('red', `  Workflow "${wfName}" not found.\n`));
+    output.write(c('gray', `  Create it: aaron workflow create ${wfName} "goal"\n`));
+    process.exit(1);
+  }
+  let wf;
+  try { wf = JSON.parse(wfRaw); } catch { output.write(c('red', `  Invalid workflow JSON: ${wfPath}\n`)); process.exit(1); }
+
+  const statePath = '/scratch/workflow-state.json';
+  let wfState = (() => { try { return JSON.parse(vfs.read(statePath) || 'null'); } catch { return null; } })();
+  if (!wfState || wfState.workflow !== wfName) {
+    wfState = { workflow: wfName, startedAt: new Date().toISOString(), completedSteps: [], currentStep: null, outputs: {} };
+    vfs.write(statePath, JSON.stringify(wfState, null, 2));
+  }
+
+  const totalSteps = wf.steps.length;
+  const doneSteps = wfState.completedSteps.length;
+  output.write('\n' + c('cyan', `  Workflow: ${wfName}`) + c('gray', ` (${doneSteps}/${totalSteps} steps done)`) + '\n');
+
+  for (const step of wf.steps) {
+    if (wfState.completedSteps.includes(step.id)) {
+      output.write(c('gray', `  ✓ [${step.id}] already done\n`));
+      continue;
+    }
+
+    output.write('\n' + c('amber', `  ▶ [${step.id}]`) + c('gray', ` ${step.prompt.slice(0, 80)}`) + '\n');
+
+    wfState.currentStep = step.id;
+    vfs.write(statePath, JSON.stringify(wfState, null, 2));
+
+    let turnPrompt = step.prompt;
+    if (step.skill && vfs.read(`/skills/${step.skill}/SKILL.md`)) {
+      turnPrompt = `Use the "${step.skill}" skill for this step.\n\n${step.prompt}`;
+    }
+    turnPrompt += `\n\nAfter completing this step:
+1. Update /scratch/workflow-state.json: add "${step.id}" to completedSteps, set outputs["${step.id}"] to a brief result summary.
+2. Call await context.commit('workflow: ${wfName} — step ${step.id} complete').
+3. context.emit({ type: 'done', message: 'Step ${step.id} complete' })`;
+
+    await runTurn(turnPrompt, state, deps);
+
+    const updatedRaw = vfs.read(statePath);
+    if (updatedRaw) { try { wfState = JSON.parse(updatedRaw); } catch {} }
+    if (!wfState.completedSteps.includes(step.id)) {
+      wfState.completedSteps.push(step.id);
+      vfs.write(statePath, JSON.stringify(wfState, null, 2));
+    }
+    output.write(c('green', `  ✓ [${step.id}] complete\n`));
+  }
+
+  output.write('\n' + c('green', `  ✅ Workflow "${wfName}" complete!`) + '\n\n');
+}
+
+// ════════════════════════════════════════════════════
 // ENTRYPOINT
 // ════════════════════════════════════════════════════
 
@@ -923,7 +1161,11 @@ function fatal(msg) {
   process.exit(1);
 }
 
-if (argv[0] === 'skill') {
+// Normalize argv[0]: `:workflow` → treat as `workflow`
+const isWorkflowCmd = argv[0] === 'workflow' || argv[0] === ':workflow';
+const isSkillCmd    = argv[0] === 'skill';
+
+if (isSkillCmd) {
   const sub = argv[1];
   // Parse --budget flag from anywhere in args
   let budget = 3;
@@ -951,6 +1193,35 @@ if (argv[0] === 'skill') {
     output.write(c('red', `  Unknown skill command: ${sub}\n`));
     skillUsage();
     process.exit(1);
+  }
+} else if (isWorkflowCmd) {
+  const sub = argv[1] || '';
+
+  if (!sub || sub === 'list' || sub === 'ls' || sub === '-h' || sub === '--help') {
+    if (sub === '-h' || sub === '--help') {
+      workflowUsage();
+    } else {
+      workflowList().catch(e => fatal(e.message));
+    }
+  } else if (sub === 'create') {
+    const name = argv[2];
+    const goal = argv.slice(3).join(' ').trim();
+    if (!name) { output.write(c('red', '  Missing workflow name. Usage: aaron workflow create <name> "goal"\n')); process.exit(1); }
+    if (!goal) { output.write(c('red', '  Missing goal. Usage: aaron workflow create <name> "goal"\n')); process.exit(1); }
+    workflowCreate(name, goal).catch(e => fatal(e.message));
+  } else if (sub === 'improve') {
+    const name = argv[2];
+    const feedback = argv.slice(3).join(' ').trim();
+    if (!name) { output.write(c('red', '  Missing workflow name. Usage: aaron workflow improve <name> "feedback"\n')); process.exit(1); }
+    if (!feedback) { output.write(c('red', '  Missing feedback. Usage: aaron workflow improve <name> "feedback"\n')); process.exit(1); }
+    workflowImprove(name, feedback).catch(e => fatal(e.message));
+  } else if (sub === 'run') {
+    const name = argv[2];
+    if (!name) { output.write(c('red', '  Missing workflow name. Usage: aaron workflow run <name>\n')); process.exit(1); }
+    workflowRun(name).catch(e => fatal(e.message));
+  } else {
+    // bare workflow name: aaron :workflow hello → run hello
+    workflowRun(sub).catch(e => fatal(e.message));
   }
 } else {
   const prompt = argv.join(' ').trim();

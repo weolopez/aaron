@@ -1,0 +1,43 @@
+{
+  "id": "texttools",
+  "name": "Text Processing CLI Tool",
+  "description": "Build a command-line text processing utility with sort, dedup, trim, and linecount commands",
+  "steps": [
+    {
+      "id": "plan",
+      "title": "Create detailed implementation plan",
+      "prompt": "Create a structured plan document at /artifacts/texttools/PLAN.md that outlines:\n1. CLI commands to implement: trim, linecount, sort (with --reverse flag), dedup\n2. Module structure: CLI entry point (bin/texttools), commands module with each command function\n3. Features for each command with examples\n4. Updated README.md structure and content\n5. Demo page implementation approach\n\nBe concrete about file paths and command signatures.",
+      "executor": "claude"
+    },
+    {
+      "id": "implement-commands",
+      "title": "Implement commands module with all command functions",
+      "prompt": "Build /artifacts/texttools/src/commands.js with complete implementations of:\n- trim(lines): Remove leading/trailing whitespace from each line\n- linecount(lines): Count total lines\n- sort(lines, reverse=false): Sort lines alphabetically (ascending by default, descending if reverse=true)\n- dedup(lines): Remove consecutive duplicate lines\n\nEach function should:\n- Accept an array of strings (lines)\n- Return an array of strings\n- Handle edge cases (empty input, single item, etc.)\n- Include JSDoc comments\n\nExport all functions as named exports.",
+      "executor": "claude"
+    },
+    {
+      "id": "implement-cli",
+      "title": "Implement CLI entry point with argument parsing",
+      "prompt": "Build /artifacts/texttools/bin/texttools with a complete CLI entry point that:\n- Uses process.argv to parse command-line arguments\n- Supports commands: trim, linecount, sort, dedup\n- For sort command, support --reverse flag for descending order\n- Reads lines from stdin or from file argument\n- Calls the appropriate command function from src/commands.js\n- Outputs results to stdout\n- Includes usage/help information\n\nMake it executable and production-ready with proper error handling.",
+      "executor": "claude"
+    },
+    {
+      "id": "create-readme",
+      "title": "Write comprehensive README.md",
+      "prompt": "Write /artifacts/texttools/README.md that documents:\n1. Project name and description\n2. Installation instructions (how to set up and run)\n3. Usage section with examples for each command:\n   - texttools trim < file.txt\n   - texttools linecount < file.txt\n   - texttools sort < file.txt\n   - texttools sort --reverse < file.txt\n   - texttools dedup < file.txt\n4. Command reference with flags and behavior\n5. Examples combining multiple commands with pipes\n\nBe detailed and practical.",
+      "executor": "claude"
+    },
+    {
+      "id": "build-demo-page",
+      "title": "Create self-contained interactive demo webpage",
+      "prompt": "Build /artifacts/texttools/demo.html as a complete, self-contained HTML file that:\n- Is a single .html file with embedded CSS and JavaScript (no external files)\n- Has a textarea input for text content\n- Shows buttons for each command: trim, linecount, sort, sort (reverse), dedup\n- Has a checkbox or toggle for --reverse flag on sort command\n- Displays results in an output area\n- Includes a sample text button to populate textarea with example data\n- Shows command execution and results clearly\n- Has a clean, modern UI with responsive design\n- All JavaScript code should be in <script> tags inside the HTML\n\nTest all commands work correctly in the browser.",
+      "executor": "claude"
+    },
+    {
+      "id": "create-package-json",
+      "title": "Create package.json and project summary",
+      "prompt": "Write /artifacts/texttools/package.json with:\n- name: \"texttools\"\n- version: \"1.0.0\"\n- description: \"Command-line text processing utility\"\n- bin entry pointing to bin/texttools\n- main pointing to src/commands.js\n- No external dependencies (use only Node.js built-ins)\n\nAlso write /artifacts/texttools/SUMMARY.md with:\n1. What was built (overview of all 4 commands)\n2. Files created and their purposes\n3. How to use the CLI and demo page\n4. Key implementation details",
+      "executor": "claude"
+    }
+  ]
+}

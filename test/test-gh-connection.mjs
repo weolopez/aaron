@@ -5,7 +5,8 @@ import { env } from 'node:process';
 
 // Load .env
 const __dir = dirname(fileURLToPath(import.meta.url));
-const envPath = join(__dir, '.env');
+const ROOT = join(__dir, '..');
+const envPath = join(ROOT, '.env');
 if (existsSync(envPath)) {
   for (const line of readFileSync(envPath, 'utf-8').split('\n')) {
     const t = line.trim();
@@ -38,7 +39,7 @@ if (res.status === 200) {
 }
 
 // Full client test
-import { createGitHubClient } from './github.js';
+import { createGitHubClient } from '../src/github.js';
 const client = createGitHubClient({ token });
 const branch = await client.getBranch('weolopez', 'aaron', 'main');
 console.log('Branch SHA:', branch?.sha?.slice(0, 8));

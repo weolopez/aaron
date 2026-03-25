@@ -16,9 +16,9 @@ import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'n
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { env, argv } from 'node:process';
-import { createVFS, execute, createLLMClient, extractCode } from './agent-core.js';
-import { runTurn, buildSkillIndex } from './agent-loop.js';
-import { runRSI, CONTRACT_RULES } from './agent-rsi.js';
+import { createVFS, execute, createLLMClient, extractCode } from '../src/agent-core.js';
+import { runTurn, buildSkillIndex } from '../src/agent-loop.js';
+import { runRSI, CONTRACT_RULES } from '../src/agent-rsi.js';
 
 const API_KEY = env.ANTHROPIC_API_KEY ?? '';
 if (!API_KEY) { console.error('ANTHROPIC_API_KEY not set'); process.exit(1); }
@@ -48,10 +48,11 @@ const ui = {
 // Hydrate VFS
 const vfs = createVFS();
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const ROOT = join(__dirname, '..');
 
 for (const f of ['agent-core.js', 'agent-loop.js', 'agent-rsi.js']) {
   try {
-    vfs.write(`/harness/${f}`, readFileSync(new URL(f, import.meta.url), 'utf8'));
+    vfs.write(`/harness/${f}`, readFileSync(join(ROOT, 'src', f), 'utf8'));
     vfs.markClean(`/harness/${f}`);
   } catch {}
 }
@@ -74,12 +75,12 @@ function loadDirToVFS(baseDir, vfsPrefix, vfs) {
   }
 }
 
-const skillsDir = join(__dirname, 'skills');
+const skillsDir = join(ROOT, 'skills');
 try { loadDirToVFS(skillsDir, '/skills/', vfs); } catch {}
 
 // Disk persistence
 const VFS_DISK_MAP = {
-  '/harness/': '',
+  '/harness/': 'src/',
   '/memory/':  'memory/',
   '/artifacts/': 'artifacts/',
 };
@@ -90,7 +91,7 @@ function flushToDisk(vfs, paths) {
     let diskPath = null;
     for (const [prefix, diskPrefix] of Object.entries(VFS_DISK_MAP)) {
       if (p.startsWith(prefix)) {
-        diskPath = join(__dirname, diskPrefix, p.slice(prefix.length));
+        diskPath = join(ROOT, diskPrefix, p.slice(prefix.length));
         break;
       }
     }

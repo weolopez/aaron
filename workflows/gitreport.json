@@ -1,0 +1,24 @@
+{
+  "name": "gitreport",
+  "description": "Generate a Git repository report with commit heatmap, contributor stats, and trend analysis",
+  "steps": [
+    {
+      "id": "fetch-git-data",
+      "name": "Fetch Git Repository Data",
+      "prompt": "Fetch git commit history and contributor data from the current Git repository. \n        Use 'git log' commands (or equivalent Node.js git library) to extract:\n        - All commits with author, date, message, file changes\n        - Contributor names and commit counts\n        - Daily/weekly commit frequency\n        Output a JSON file at /artifacts/gitreport/git-data.json with structure:\n        { commits: [{author, date, message, filesChanged}, ...], contributors: [{name, count}, ...], dailyStats: [...] }",
+      "outputPath": "/artifacts/gitreport/git-data.json"
+    },
+    {
+      "id": "generate-html-report",
+      "name": "Generate Complete HTML Report with Embedded Charts",
+      "prompt": "Read the git data from /artifacts/gitreport/git-data.json and generate a complete, self-contained HTML file.\n        The HTML must include:\n        1. A commit heatmap (calendar-style grid or chart showing commits per day/week)\n        2. A contributor table with names, commit counts, and percentages\n        3. Trend visualization (commits over time)\n        4. Summary statistics (total commits, total contributors, date range)\n        5. All CSS styling EMBEDDED in <style> tags\n        6. All JavaScript (chart rendering, data processing) EMBEDDED in <script> tags\n        7. Use a lightweight charting library like Chart.js or canvas-based visualization\n        Output a complete, valid HTML file at /artifacts/gitreport/report.html that opens in a browser.\n        Do NOT create separate .css or .js files — everything must be in the single HTML file.",
+      "outputPath": "/artifacts/gitreport/report.html"
+    },
+    {
+      "id": "verify-output",
+      "name": "Verify Report Generation",
+      "prompt": "Verify that /artifacts/gitreport/report.html was created successfully and is valid HTML.\n        Check that:\n        1. The file exists and is not empty\n        2. It contains opening and closing <html> tags\n        3. It includes embedded <style> and <script> tags\n        4. It has the heatmap, contributor table, and trend sections\n        Print a success message showing the output path: /artifacts/gitreport/report.html\n        If any checks fail, provide detailed error information.",
+      "outputPath": null
+    }
+  ]
+}

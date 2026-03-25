@@ -19,6 +19,7 @@
 
 import { buildSkillIndex } from './agent-loop.js';
 import { createGitHubClient, commitToGitHub } from './github.js';
+import vm from 'node:vm';
 
 // ════════════════════════════════════════════════════
 // EVAL RUNNER
@@ -93,6 +94,7 @@ export const CONTRACT_RULES = [
   'MUST call ui.setStatus(), ui.showCode(), ui.emitEvent(), ui.onRetry(), ui.onTurnComplete()',
   'Only modify the SYSTEM prompt string or add logic around the existing runTurn structure',
   'Preserve the retry loop pattern and error recovery flow',
+  'The file must be syntactically valid JavaScript — unescaped backticks inside template literals will fail',
 ];
 
 function validateContract(source) {
@@ -144,6 +146,15 @@ function validateContract(source) {
   // 7. Must call UI adapter methods
   if (!/ui\.setStatus/.test(source) && !/deps\.ui/.test(source)) {
     violations.push('Does not call UI adapter methods (ui.setStatus, etc.)');
+  }
+
+  // 8. Syntax check — catches unescaped backticks, stray tokens, etc.
+  try {
+    new vm.Script(source);
+  } catch (e) {
+    if (e instanceof SyntaxError) {
+      violations.push(`Syntax error: ${e.message}`);
+    }
   }
 
   return { valid: violations.length === 0, violations };

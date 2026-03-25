@@ -726,9 +726,9 @@ textarea#input::placeholder { color: var(--dim); }
 
 <script type="module">
 
-import { createVFS, execute, createLLMClient, extractCode } from './agent-core.js';
-import { runTurn, buildSkillIndex } from './agent-loop.js';
-import { createGitHubClient, initFromGitHub, commitToGitHub } from './github.js';
+import { createVFS, execute, createLLMClient, extractCode } from './src/agent-core.js';
+import { runTurn, buildSkillIndex } from './src/agent-loop.js';
+import { createGitHubClient, initFromGitHub, commitToGitHub } from './src/github.js';
 
 // ════════════════════════════════════════════════════
 // CONFIG
@@ -738,11 +738,11 @@ const MODEL = 'claude-sonnet-4-20250514';
 
 // ── API KEY (browser only — scoped to Anthropic requests only) ──
 function makeLLM(apiKey) {
-  const headers = apiKey ? {
-    'x-api-key': apiKey,
+  const headers = {
     'anthropic-version': '2023-06-01',
     'anthropic-dangerous-direct-browser-access': 'true',
-  } : {};
+  };
+  if (apiKey) headers['x-api-key'] = apiKey;
   return createLLMClient({ model: MODEL, headers });
 }
 
@@ -970,10 +970,10 @@ function showModal(path, content, bytes) {
 // ════════════════════════════════════════════════════
 
 async function hydrateHarness(vfs) {
-  // Load harness source files
+  // Load harness source files (now live in src/)
   for (const f of ['agent-core.js', 'agent-loop.js']) {
     try {
-      const content = await fetch(f).then(r => r.text());
+      const content = await fetch(`src/${f}`).then(r => r.text());
       vfs.write(`/harness/${f}`, content);
       vfs.markClean(`/harness/${f}`);
     } catch { /* skip */ }
@@ -1098,13 +1098,21 @@ async function ghConnect() {
 
 async function ghPush() {
   if (!ghClient || !ghConfig) return;
+  const prefixes = ['/src/', '/workflows/', '/artifacts/', '/memory/', '/scratch/'];
+  let totalPushed = 0, totalConflicts = 0;
   try {
-    const result = await commitToGitHub(vfs, ghClient, {
-      owner: ghConfig.owner, repo: ghConfig.repo,
-      branch: ghConfig.ref, message: 'Update from Aaron (browser)',
-      pathPrefix: '/src/',
-    }, (ev) => ui.emitEvent(ev));
-    ui.addSysMsg(`Pushed ${result.pushed.length} file(s) to GitHub.${result.conflicts.length ? ` ${result.conflicts.length} conflict(s).` : ''}`);
+    for (const prefix of prefixes) {
+      const dirty = vfs.list().filter(p => p.startsWith(prefix) && vfs.isDirty(p));
+      if (dirty.length === 0) continue;
+      const result = await commitToGitHub(vfs, ghClient, {
+        owner: ghConfig.owner, repo: ghConfig.repo,
+        branch: ghConfig.ref, message: 'Update from Aaron (browser)',
+        pathPrefix: prefix,
+      }, (ev) => ui.emitEvent(ev));
+      totalPushed += result.pushed.length;
+      totalConflicts += result.conflicts.length;
+    }
+    ui.addSysMsg(`Pushed ${totalPushed} file(s) to GitHub.${totalConflicts ? ` ${totalConflicts} conflict(s).` : ''}`);
   } catch (e) {
     ui.addSysMsg(`GitHub push failed: ${e.message}`);
   }
@@ -1149,18 +1157,31 @@ const agentState = {
 const deps = { llm, execute, extractCode, ui };
 // llm is reassigned when API key is set — applyApiKey() updates deps.llm directly
 
-// Hydrate harness files into VFS
-hydrateHarness(vfs).then(() => {
+// Hydrate harness files into VFS, then auto-connect GitHub if credentials are saved
+hydrateHarness(vfs).then(async () => {
   // Build skill index for progressive disclosure in SYSTEM prompt
   agentState.context.skillIndex = buildSkillIndex(vfs);
 
-  const count = vfs.list().filter(p => !p.startsWith('/harness/')).length;
-  const extra = count > 0 ? `\n${count} file(s) loaded from disk.` : '';
-  ui.addSysMsg(
-    'Harness ready.' + extra + '\n\n' +
-    'Commands: :vfs  :cat /path  :workflow [name]\n' +
-    'Try: "create a workflow called my-app to build a todo list app" then ":workflow my-app"'
-  );
+  const saved = (() => { try { return JSON.parse(localStorage.getItem('aaron-github') || 'null'); } catch { return null; } })();
+  if (saved?.repo && saved?.token) {
+    // Auto-connect to GitHub — loads latest skills, workflows, memory from repo
+    ghRepoInput.value = saved.repo;
+    ghTokenInput.value = saved.token;
+    await ghConnect();
+    // Rebuild skill index after GitHub hydration
+    agentState.context.skillIndex = buildSkillIndex(vfs);
+  } else {
+    const count = vfs.list().filter(p => !p.startsWith('/harness/')).length;
+    const extra = count > 0 ? `\n${count} file(s) loaded from disk.` : '';
+    ui.addSysMsg(
+      'Harness ready.' + extra + '\n\n' +
+      'Commands: :vfs  :cat /path  :workflow\n' +
+      '  :workflow create <name> <goal>     — define a new workflow\n' +
+      '  :workflow improve <name> <feedback>— revise step prompts\n' +
+      '  :workflow <name>                   — run it\n\n' +
+      'Connect GitHub to sync workflows and memory across sessions.'
+    );
+  }
 });
 
 // Send
@@ -1192,11 +1213,13 @@ async function handleSend() {
   }
 
   if (msg === ':workflow' || msg.startsWith(':workflow ')) {
-    const wfName = msg.slice(10).trim();
-    if (!wfName) {
+    const args = msg.slice(10).trim();
+
+    // ── :workflow list (or bare :workflow) ──
+    if (!args || args === 'list') {
       const wfPaths = vfs.list().filter(p => p.startsWith('/workflows/') && p.endsWith('.json'));
       if (wfPaths.length === 0) {
-        ui.addSysMsg('No workflows in /workflows/\nAsk the agent: "create a workflow called <name> to <goal>"');
+        ui.addSysMsg('No workflows yet.\n\nCreate one:\n  :workflow create <name> <goal description>');
       } else {
         const stateRaw = vfs.read('/scratch/workflow-state.json');
         const wfState = stateRaw ? (() => { try { return JSON.parse(stateRaw); } catch { return null; } })() : null;
@@ -1209,15 +1232,84 @@ async function handleSend() {
             return `${wf.name}  [${status}]${wf.description ? '\n  ' + wf.description : ''}`;
           } catch { return p; }
         });
-        ui.addSysMsg('Workflows:\n' + lines.join('\n\n') + '\n\nType ":workflow <name>" to run.');
+        ui.addSysMsg('Workflows:\n' + lines.join('\n\n') + '\n\n:workflow <name>                   — run\n:workflow create <name> <goal>     — create new\n:workflow improve <name> <feedback>— revise steps');
       }
       return;
     }
 
+    // ── :workflow create <name> <goal> ──
+    if (args.startsWith('create ')) {
+      const rest = args.slice(7).trim();
+      const spaceIdx = rest.indexOf(' ');
+      if (spaceIdx === -1) {
+        ui.addSysMsg('Usage: :workflow create <name> <goal description>');
+        return;
+      }
+      const wfName = rest.slice(0, spaceIdx);
+      const goal = rest.slice(spaceIdx + 1).trim();
+      const createPrompt = [
+        `Create a workflow definition for a task called "${wfName}".`,
+        `Goal: ${goal}`,
+        `Write the workflow as JSON to /workflows/${wfName}.json.`,
+        'The JSON must have: { "name": "' + wfName + '", "description": "...", "steps": [...] }',
+        'Each step: { "id": "step-name", "skill": null, "prompt": "..." }',
+        'Rules for writing step prompts:',
+        '- Each prompt must describe a COMPLETE, CONCRETE deliverable with exact file paths',
+        '- If the goal involves a web page, one step must write a complete self-contained HTML file',
+        '  (embed CSS and JavaScript inside the HTML — do not create separate .css / .js files)',
+        '- Each prompt must include the exact artifact path: write to /artifacts/' + wfName + '/<file>',
+        '- Use 3-5 focused steps',
+        'Do NOT execute the steps — only write the workflow definition file.',
+        `context.emit({ type: 'done', message: 'Workflow "${wfName}" created. Run it with :workflow ${wfName}' })`,
+      ].join('\n');
+      ui.addUserMsg(`:workflow create ${wfName} ${goal}`);
+      await runTurn(createPrompt, agentState, deps);
+      return;
+    }
+
+    // ── :workflow improve <name> <feedback> ──
+    if (args.startsWith('improve ')) {
+      const rest = args.slice(8).trim();
+      const spaceIdx = rest.indexOf(' ');
+      if (spaceIdx === -1) {
+        ui.addSysMsg('Usage: :workflow improve <name> <feedback>');
+        return;
+      }
+      const wfName = rest.slice(0, spaceIdx);
+      const feedback = rest.slice(spaceIdx + 1).trim();
+      const wfPath = `/workflows/${wfName}.json`;
+      const wfRaw = vfs.read(wfPath);
+      if (!wfRaw) {
+        ui.addSysMsg(`Workflow "${wfName}" not found.\n\nCreate it first:\n  :workflow create ${wfName} <goal>`);
+        return;
+      }
+      const improvePrompt = [
+        `Read /workflows/${wfName}.json — this is the current workflow definition.`,
+        ``,
+        `User feedback: ${feedback}`,
+        ``,
+        `Revise the workflow definition to address this feedback:`,
+        `- Update step prompts to be more specific and produce complete, concrete deliverables`,
+        `- If the goal involves a web page, ensure one step writes a complete self-contained HTML file`,
+        `  (embed CSS and JavaScript inside the HTML — do not create separate .css / .js files)`,
+        `- Each step prompt must include the exact output path under /artifacts/${wfName}/<file>`,
+        `- Add new steps if needed, remove unnecessary ones, keep 3-6 steps total`,
+        ``,
+        `Write the revised version back to /workflows/${wfName}.json.`,
+        `Do NOT execute the steps — only revise the workflow definition file.`,
+        `context.emit({ type: 'done', message: 'Workflow "${wfName}" improved. Run it with :workflow ${wfName}' })`,
+      ].join('\n');
+      ui.addUserMsg(`:workflow improve ${wfName} "${feedback}"`);
+      await runTurn(improvePrompt, agentState, deps);
+      return;
+    }
+
+    // ── :workflow <name> — run or resume ──
+    const wfName = args;
     const wfPath = `/workflows/${wfName}.json`;
     const wfRaw = vfs.read(wfPath);
     if (!wfRaw) {
-      ui.addSysMsg(`Workflow not found: ${wfPath}\nAsk the agent to create it first.`);
+      ui.addSysMsg(`Workflow "${wfName}" not found.\n\nCreate it first:\n  :workflow create ${wfName} <goal description>`);
       return;
     }
     let wf;

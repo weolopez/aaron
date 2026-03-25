@@ -15,9 +15,9 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { env } from 'node:process';
-import { createVFS, execute, createLLMClient, extractCode } from './agent-core.js';
-import { runTurn } from './agent-loop.js';
-import { runExperiment } from './agent-rsi.js';
+import { createVFS, execute, createLLMClient, extractCode } from '../src/agent-core.js';
+import { runTurn } from '../src/agent-loop.js';
+import { runExperiment } from '../src/agent-rsi.js';
 
 const API_KEY = env.ANTHROPIC_API_KEY ?? '';
 if (!API_KEY) { console.error('ANTHROPIC_API_KEY not set'); process.exit(1); }
@@ -50,18 +50,19 @@ const ui = {
 // ════════════════════════════════════════════════════
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const ROOT = join(__dirname, '..');
 
 function hydrateVFS(vfs) {
   for (const f of ['agent-core.js', 'agent-loop.js', 'agent-rsi.js']) {
     try {
-      vfs.write(`/harness/${f}`, readFileSync(new URL(f, import.meta.url), 'utf8'));
+      vfs.write(`/harness/${f}`, readFileSync(join(ROOT, 'src', f), 'utf8'));
       vfs.markClean(`/harness/${f}`);
     } catch {}
   }
 }
 
 const VFS_DISK_MAP = {
-  '/harness/': '',
+  '/harness/': 'src/',
   '/memory/':  'memory/',
   '/artifacts/': 'artifacts/',
 };
@@ -72,7 +73,7 @@ function flushToDisk(vfs, paths) {
     let diskPath = null;
     for (const [prefix, diskPrefix] of Object.entries(VFS_DISK_MAP)) {
       if (p.startsWith(prefix)) {
-        diskPath = join(__dirname, diskPrefix, p.slice(prefix.length));
+        diskPath = join(ROOT, diskPrefix, p.slice(prefix.length));
         break;
       }
     }

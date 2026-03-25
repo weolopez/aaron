@@ -8,9 +8,9 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { env } from 'node:process';
-import { createVFS, execute, createLLMClient, extractCode } from './agent-core.js';
-import { runTurn } from './agent-loop.js';
-import { runRSI, CONTRACT_RULES } from './agent-rsi.js';
+import { createVFS, execute, createLLMClient, extractCode } from '../src/agent-core.js';
+import { runTurn } from '../src/agent-loop.js';
+import { runRSI, CONTRACT_RULES } from '../src/agent-rsi.js';
 
 const API_KEY = env.ANTHROPIC_API_KEY ?? '';
 if (!API_KEY) { console.error('ANTHROPIC_API_KEY not set'); process.exit(1); }
@@ -45,8 +45,9 @@ for (const f of ['agent-core.js', 'agent-loop.js', 'agent-rsi.js']) {
 
 // Disk persistence
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const ROOT = join(__dirname, '..');
 const VFS_DISK_MAP = {
-  '/harness/': '',
+  '/harness/': 'src/',
   '/memory/':  'memory/',
   '/artifacts/': 'artifacts/',
 };
@@ -57,7 +58,7 @@ function flushToDisk(vfs, paths) {
     let diskPath = null;
     for (const [prefix, diskPrefix] of Object.entries(VFS_DISK_MAP)) {
       if (p.startsWith(prefix)) {
-        diskPath = join(__dirname, diskPrefix, p.slice(prefix.length));
+        diskPath = join(ROOT, diskPrefix, p.slice(prefix.length));
         break;
       }
     }
