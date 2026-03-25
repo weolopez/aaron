@@ -14,10 +14,10 @@ import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync } from 
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stdin as input, stdout as output, env } from 'node:process';
-import { createVFS, execute, createLLMClient, extractCode } from './src/agent-core.js';
+import { createVFS, execute, extractCode } from './src/agent-core.js';
 import { runTurn, buildSkillIndex } from './src/agent-loop.js';
 import { runRSI, runSkillRSI } from './src/agent-rsi.js';
-import { createGitHubClient, initFromGitHub, commitToGitHub } from './src/github.js';
+import { createGitHubClient, initFromGitHub, commitToGitHub, parseGitHubRepo } from './src/github.js';
 
 // ════════════════════════════════════════════════════
 // .env loader (zero deps)
@@ -59,28 +59,10 @@ const c = (color, str) => `${A[color]}${str}${A.reset}`;
 // CONFIG
 // ════════════════════════════════════════════════════
 
-const MODEL = 'claude-haiku-4-5';
-const API_KEY = env.ANTHROPIC_API_KEY ?? '';
 const GITHUB_TOKEN = env.GITHUB_TOKEN ?? '';
 const GITHUB_REPO  = env.GITHUB_REPO ?? '';   // "owner/repo" or "owner/repo@ref"
 
-const llm = createLLMClient({
-  model: MODEL,
-  headers: {
-    'x-api-key': API_KEY,
-    'anthropic-version': '2023-06-01',
-  },
-});
-
 // GitHub client (created only when GITHUB_TOKEN is set)
-function parseGitHubRepo(repoStr) {
-  if (!repoStr) return null;
-  const [ownerRepo, ref] = repoStr.split('@');
-  const [owner, repo] = ownerRepo.split('/');
-  if (!owner || !repo) return null;
-  return { owner, repo, ref: ref || 'main' };
-}
-
 const ghConfig = parseGitHubRepo(GITHUB_REPO);
 const ghClient = GITHUB_TOKEN && ghConfig
   ? createGitHubClient({ token: GITHUB_TOKEN })
@@ -186,9 +168,10 @@ const ui = {
   },
 
   banner() {
+    const provider = env.LLM_PROVIDER ?? 'anthropic';
     output.write('\n');
     output.write(c('amber', '  agent/harness') + c('gray', '  cli\n'));
-    output.write(c('gray',  '  model: ') + c('dim', llm.model) + '\n');
+    output.write(c('gray',  '  provider: ') + c('dim', provider) + '\n');
     output.write(c('gray',  '  node:  ') + c('dim', process.version) + '\n');
     output.write('\n');
     output.write(c('gray', '  Commands:\n'));
@@ -331,7 +314,8 @@ function flushToDisk(vfs, paths) {
 // ════════════════════════════════════════════════════
 
 async function repl() {
-  if (!API_KEY) {
+  const provider = env.LLM_PROVIDER ?? 'anthropic';
+  if (provider === 'anthropic' && !env.ANTHROPIC_API_KEY) {
     output.write(c('red', '\nError: ANTHROPIC_API_KEY is not set.\n'));
     output.write(c('gray', 'Usage: ANTHROPIC_API_KEY=sk-ant-... node agent-harness.mjs\n\n'));
     process.exit(1);
@@ -397,7 +381,7 @@ async function repl() {
     context,
   };
 
-  const deps = { llm, execute, extractCode, ui, runTurn };
+  const deps = { execute, extractCode, ui, runTurn };
 
   const rsiLog = (msg) => output.write(c('cyan', `  rsi  `) + c('gray', msg) + '\n');
 
@@ -826,10 +810,12 @@ async function repl() {
 // ════════════════════════════════════════════════════
 
 function requireKey() {
-  if (!API_KEY) {
+  const provider = env.LLM_PROVIDER ?? 'anthropic';
+  if (provider === 'anthropic' && !env.ANTHROPIC_API_KEY) {
     output.write(c('red', 'Error: ANTHROPIC_API_KEY is not set.\n'));
     process.exit(1);
   }
+  // askarchitect doesn't need an API key upfront (uses session auth)
 }
 
 function createRunContext() {
@@ -870,7 +856,7 @@ function createRunContext() {
   };
 
   const state = { history: [], turn: 0, context };
-  const deps = { llm, execute, extractCode, ui, runTurn };
+  const deps = { execute, extractCode, ui, runTurn };
   return { vfs, state, deps, rsiLog };
 }
 

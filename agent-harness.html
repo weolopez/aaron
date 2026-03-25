@@ -726,9 +726,9 @@ textarea#input::placeholder { color: var(--dim); }
 
 <script type="module">
 
-import { createVFS, execute, createLLMClient, extractCode } from './src/agent-core.js';
+import { createVFS, execute, extractCode } from './src/agent-core.js';
 import { runTurn, buildSkillIndex } from './src/agent-loop.js';
-import { createGitHubClient, initFromGitHub, commitToGitHub } from './src/github.js';
+import { createGitHubClient, initFromGitHub, commitToGitHub, parseGitHubRepo } from './src/github.js';
 
 // ════════════════════════════════════════════════════
 // CONFIG
@@ -736,17 +736,10 @@ import { createGitHubClient, initFromGitHub, commitToGitHub } from './src/github
 
 const MODEL = 'claude-sonnet-4-20250514';
 
-// ── API KEY (browser only — scoped to Anthropic requests only) ──
-function makeLLM(apiKey) {
-  const headers = {
-    'anthropic-version': '2023-06-01',
-    'anthropic-dangerous-direct-browser-access': 'true',
-  };
-  if (apiKey) headers['x-api-key'] = apiKey;
-  return createLLMClient({ model: MODEL, headers });
+// ── API KEY (stored for llm-client.js to read) ──
+function storeApiKey(apiKey) {
+  if (apiKey) localStorage.setItem('ANTHROPIC_API_KEY', apiKey);
 }
-
-let llm = makeLLM(localStorage.getItem('aaron-apikey') || '');
 
 // ════════════════════════════════════════════════════
 // UI
@@ -1026,10 +1019,8 @@ if (savedApiKey) apiKeyInput.value = savedApiKey;
 function applyApiKey() {
   const key = apiKeyInput.value.trim();
   if (!key) return;
-  localStorage.setItem('aaron-apikey', key);
-  llm = makeLLM(key);
-  deps.llm = llm;
-  ui.addSysMsg('API key set.');
+  storeApiKey(key);
+  ui.addSysMsg('API key stored. Will be used for next request.');
 }
 
 apiKeySetBtn.addEventListener('click', applyApiKey);
@@ -1053,13 +1044,7 @@ try {
   }
 } catch { /* ignore */ }
 
-function parseGitHubRepo(repoStr) {
-  if (!repoStr) return null;
-  const [ownerRepo, ref] = repoStr.split('@');
-  const [owner, repo] = ownerRepo.split('/');
-  if (!owner || !repo) return null;
-  return { owner, repo, ref: ref || 'main' };
-}
+// parseGitHubRepo imported from github.js
 
 async function ghConnect() {
   const repoStr = ghRepoInput.value.trim();
@@ -1154,8 +1139,7 @@ const agentState = {
   },
 };
 
-const deps = { llm, execute, extractCode, ui };
-// llm is reassigned when API key is set — applyApiKey() updates deps.llm directly
+const deps = { execute, extractCode, ui };
 
 // Hydrate harness files into VFS, then auto-connect GitHub if credentials are saved
 hydrateHarness(vfs).then(async () => {

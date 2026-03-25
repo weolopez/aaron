@@ -4,7 +4,7 @@
  * Pure fetch, zero dependencies. Works in both browser and Node 18+.
  * Token is injected at creation time and never exposed to agent code.
  *
- * Exports: createGitHubClient, initFromGitHub, commitToGitHub
+ * Exports: createGitHubClient, initFromGitHub, commitToGitHub, parseGitHubRepo
  */
 
 // ════════════════════════════════════════════════════
@@ -262,4 +262,21 @@ export async function commitToGitHub(vfs, client, config, emit) {
 
   emit?.({ type: 'progress', message: `Pushed ${pushed.length} file(s)${conflicts.length ? `, ${conflicts.length} conflict(s)` : ''}` });
   return { pushed, conflicts };
+}
+
+// ════════════════════════════════════════════════════
+// UTILITIES
+// ════════════════════════════════════════════════════
+
+/**
+ * Parse a GitHub repo string like "owner/repo" or "owner/repo@ref".
+ * @param {string} repoStr
+ * @returns {{owner: string, repo: string, ref: string} | null}
+ */
+export function parseGitHubRepo(repoStr) {
+  if (!repoStr) return null;
+  const [ownerRepo, ref] = repoStr.split('@');
+  const [owner, repo] = ownerRepo.split('/');
+  if (!owner || !repo) return null;
+  return { owner, repo, ref: ref || 'main' };
 }

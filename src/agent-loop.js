@@ -8,6 +8,8 @@
  * Exports: SYSTEM, MAX_RETRIES, runTurn
  */
 
+import { getLLMClient } from './llm-client.js';
+
 // ════════════════════════════════════════════════════
 // SYSTEM PROMPT
 // ════════════════════════════════════════════════════
@@ -136,7 +138,8 @@ export const MAX_RETRIES = 3;
  *   ui.onRetry(attempt, max)     — show retry indicator
  *   ui.onTurnComplete(turn, vfs) — refresh display after successful turn
  */
-export async function runTurn(userMessage, state, { llm, execute, extractCode, ui }) {
+export async function runTurn(userMessage, state, { execute, extractCode, ui }) {
+  const llm = getLLMClient();
   state.history.push({ role: 'user', content: userMessage });
   ui.setStatus('thinking');
 

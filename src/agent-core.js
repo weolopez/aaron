@@ -4,7 +4,7 @@
  * NEVER modified by RSI. These primitives are the foundation
  * that everything else builds on. See ADR.md Decision 11.
  *
- * Exports: createVFS, execute, createLLMClient, extractCode
+ * Exports: createVFS, execute, extractCode
  */
 
 // ════════════════════════════════════════════════════
@@ -94,32 +94,6 @@ export async function execute(code, context, timeoutMs = 15_000) {
       ),
     ),
   ]);
-}
-
-// ════════════════════════════════════════════════════
-// LLM CLIENT
-// ════════════════════════════════════════════════════
-
-export function createLLMClient({
-  model,
-  apiUrl = 'https://api.anthropic.com/v1/messages',
-  headers = {},
-}) {
-  return {
-    model,
-    async call(messages, system) {
-      const res = await fetch(apiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...headers },
-        body: JSON.stringify({ model, max_tokens: 16384, system, messages }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err?.error?.message ?? `LLM API error ${res.status}`);
-      }
-      return res.json();
-    },
-  };
 }
 
 // ════════════════════════════════════════════════════
