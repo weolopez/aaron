@@ -39,6 +39,9 @@ ANTHROPIC_API_KEY=sk-ant-... node rsi-ui.mjs
 | `:rsi [budget]` | Run harness RSI experiment loop (default 5) |
 | `:skill [budget]` | Run skill RSI loop |
 | `:workflow` | List workflows in `/workflows/` |
+| `:workflow create <name> <goal>` | Create a new workflow definition |
+| `:workflow improve <name> <feedback>` | Revise step prompts via agent turn |
+| `:workflow rsi <name> [budget]` | Iterate workflow definition with LLM-judged scoring |
 | `:workflow <name>` | Run or resume a named workflow (drives agent turn-by-turn) |
 | `:clear` | Reset conversation history (VFS persists) |
 | `:exit` | Quit |
@@ -48,11 +51,15 @@ ANTHROPIC_API_KEY=sk-ant-... node rsi-ui.mjs
 ### Core Invariant / Mutable Split
 
 ```
-agent-core.js     ← INVARIANT: createVFS(), execute(), createLLMClient(), extractCode()
-agent-loop.js     ← MUTABLE (RSI target): SYSTEM prompt, runTurn(), MAX_RETRIES
-agent-rsi.js      ← RSI experiment runner, validateContract(), scoring
-agent-harness.mjs ← CLI harness (Node 18+, ANSI output, disk persistence)
-agent-harness.html← Browser harness (DOM, zero deps, platform API proxy)
+agent-core.js        ← INVARIANT: createVFS(), execute(), createLLMClient(), extractCode()
+agent-loop.js        ← MUTABLE (RSI target): SYSTEM prompt, runTurn(), MAX_RETRIES
+agent-rsi.js         ← RSI experiment runner, validateContract(), harness/skill scoring
+agent-harness.mjs    ← CLI harness (Node 18+, ANSI output, disk persistence)
+agent-harness.html   ← Browser harness (DOM, zero deps, platform API proxy)
+src/workflow-runner.js ← Isomorphic workflow orchestration: runWorkflowSteps, runWorkflowRSI,
+                         buildWorkflowScorer — shared by both harnesses
+src/llm-client.js    ← INVARIANT: LLM client creation (default model: claude-sonnet-4-6)
+src/session.js       ← Session persistence (VFS + history to disk/localStorage)
 ```
 
 The invariant core (`agent-core.js`) is **never self-modified by RSI**. The mutable harness (`agent-loop.js`) is what the agent iterates on. Humans steer via `/program.md` and `/memory/`.
@@ -71,7 +78,7 @@ context.vfs.list()                // → string[], sorted
 |-----------|---------|
 | `/src/` | Working codebase |
 | `/harness/` | Agent's own runtime (RSI target) |
-| `/memory/` | Long-term durable facts (persisted to `memory/` on disk) |
+| `/memory/` | Long-term durable facts (persisted to `memory/` on disk); includes `agent-history.json` (workflow conversation state) and `experiments.jsonl` (RSI journal) |
 | `/scratch/` | Ephemeral planning scratchpad |
 | `/artifacts/` | Agent outputs (persisted to `artifacts/` on disk) |
 | `/skills/*/` | Skill definitions (agentskills.io standard) |
@@ -80,11 +87,21 @@ context.vfs.list()                // → string[], sorted
 
 ### RSI Loop
 
+**Harness RSI** (`:rsi`):
 ```
 snapshot /harness/* → baseline eval → mutate agent-loop.js → contract validate → experiment eval → keep/discard → log to /memory/experiments.jsonl
 ```
+`validateContract()` enforces 7 structural invariants on any mutated `agent-loop.js`. Skill RSI (`:skill`) runs the same loop targeting `/skills/*`.
 
-`validateContract()` enforces 7 structural invariants on any mutated `agent-loop.js` before running evals. Violations are discarded without eval. Skill RSI runs the same loop targeting `/skills/*`.
+**Workflow RSI** (`:workflow rsi <name>`):
+```
+snapshot workflow JSON → run baseline (score artifacts) → mutate workflow definition → validate JSON → run experiment → LLM-judge quality → keep/discard → log
+```
+`buildWorkflowScorer(llm)` in `workflow-runner.js` calls the LLM to rate artifact quality 0–10 against `wf.description`; this drives keep/discard. Falls back to artifact byte-count heuristic if scorer unavailable.
+
+### Workflow Persistence
+
+Each workflow step saves `state.history` to `/memory/agent-history.json` after its checkpoint. When a workflow is resumed in a new session, the conversation context is restored, giving the agent full memory of what was already done.
 
 ### Emit Protocol
 
@@ -100,7 +117,7 @@ context.emit({ type: 'experiment', id: '...', kept: true, reason: '...' })
 
 ### Skill System
 
-Skills live in `skills/<name>/SKILL.md` with YAML frontmatter. `buildSkillIndex(vfs)` generates a compact index injected into SYSTEM at startup; agents read full instructions on demand via `context.vfs.read('/skills/<name>/SKILL.md')`.
+Skills live in `skills/<name>/SKILL.md` with YAML frontmatter. `buildSkillIndex(vfs)` generates a compact index injected into SYSTEM at startup. When a workflow step references `step.skill`, the **full** `SKILL.md` content is injected into that step's prompt — not just a weak prefix.
 
 ## Code Style
 
