@@ -697,7 +697,7 @@ textarea#input::placeholder { color: var(--dim); }
         <button id="preview-src" title="Toggle source view">src</button>
       </div>
       <div class="preview-empty" id="preview-empty">Run a prompt to generate components.<br>HTML artifacts will appear here.</div>
-      <iframe class="preview-frame" id="preview-frame" sandbox="allow-scripts" style="display:none;"></iframe>
+      <iframe class="preview-frame" id="preview-frame" sandbox="allow-forms allow-scripts" style="display:none;"></iframe>
     </div>
 
     <!-- RIGHT: events + VFS -->
@@ -1143,6 +1143,15 @@ const deps = { execute, extractCode, ui };
 
 // Hydrate harness files into VFS, then auto-connect GitHub if credentials are saved
 hydrateHarness(vfs).then(async () => {
+  const savedSession = await loadSession();
+  if (savedSession) {
+    for (const [path, content] of Object.entries(savedSession.vfs || {})) {
+      vfs.write(path, content);
+    }
+    agentState.history = savedSession.state?.history || [];
+    agentState.turn = savedSession.state?.turn || 0;
+  }
+
   // Build skill index for progressive disclosure in SYSTEM prompt
   agentState.context.skillIndex = buildSkillIndex(vfs);
 
@@ -1154,7 +1163,11 @@ hydrateHarness(vfs).then(async () => {
     await ghConnect();
     // Rebuild skill index after GitHub hydration
     agentState.context.skillIndex = buildSkillIndex(vfs);
-  } else {
+  }
+
+  if (savedSession) {
+    ui.addSysMsg(`Session resumed. ${agentState.turn} turn(s) restored.`);
+  } else if (!saved?.repo || !saved?.token) {
     const count = vfs.list().filter(p => !p.startsWith('/harness/')).length;
     const extra = count > 0 ? `\n${count} file(s) loaded from disk.` : '';
     ui.addSysMsg(
@@ -1193,6 +1206,14 @@ async function handleSend() {
     const content = vfs.read(path);
     if (content === null) { ui.addSysMsg(`Not found: ${path}`); return; }
     ui.addSysMsg(`${path}:\n\n${content}`);
+    return;
+  }
+
+  if (msg === ':reset') {
+    await clearSession();
+    agentState.history = [];
+    agentState.turn = 0;
+    ui.addSysMsg('Persisted session cleared.');
     return;
   }
 

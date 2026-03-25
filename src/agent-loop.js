@@ -9,6 +9,7 @@
  */
 
 import { getLLMClient } from './llm-client.js';
+import { saveSession } from './session.js';
 
 // ════════════════════════════════════════════════════
 // SYSTEM PROMPT
@@ -168,6 +169,10 @@ export async function runTurn(userMessage, state, { execute, extractCode, ui }) 
       state.turn++;
       ui.setStatus('idle');
       ui.onTurnComplete(state.turn, state.context.vfs);
+
+      // Persist session
+      await saveSession(state, state.context.vfs);
+
       return;
 
     } catch (err) {

@@ -18,6 +18,7 @@ import { createVFS, execute, extractCode } from './src/agent-core.js';
 import { runTurn, buildSkillIndex } from './src/agent-loop.js';
 import { runRSI, runSkillRSI } from './src/agent-rsi.js';
 import { createGitHubClient, initFromGitHub, commitToGitHub, parseGitHubRepo } from './src/github.js';
+import { loadSession, clearSession } from './src/session.js';
 
 // ════════════════════════════════════════════════════
 // .env loader (zero deps)
@@ -323,9 +324,85 @@ async function repl() {
 
   ui.banner();
 
-  const vfs = createVFS();
-  hydrateHarness(vfs);
-  writeManifest();
+  const rl = readline.createInterface({ input, output, terminal: true });
+
+  // Check for saved session and offer to resume
+  const savedSession = await loadSession();
+  let state;
+  let vfs;
+
+  if (savedSession) {
+    const age = Date.now() - new Date(savedSession.timestamp).getTime();
+    const minutes = Math.floor(age / 60000);
+    const hours = Math.floor(age / 3600000);
+    const ageStr = hours > 0 ? `${hours}h ago` : `${minutes}m ago`;
+    const turns = savedSession.state?.history?.filter(m => m.role === 'assistant').length || 0;
+
+    const answer = (await rl.question(
+      c('cyan', '\n  [session]') + c('gray', ` Saved session found (${turns} turns, ${ageStr})\n  Resume? [y/n] `)
+    )).trim().toLowerCase();
+
+    if (answer === 'y' || answer === 'yes') {
+      vfs = createVFS();
+      // Restore VFS contents
+      if (savedSession.vfs) {
+        for (const [path, content] of Object.entries(savedSession.vfs)) {
+          vfs.write(path, content);
+        }
+      }
+      hydrateHarness(vfs);
+      writeManifest();
+
+      const skillIndex = buildSkillIndex(vfs);
+      const context = {
+        vfs,
+        fetch: (...args) => fetch(...args),
+        emit:  (ev) => ui.emitEvent(ev),
+        env:   {},
+        skillIndex,
+        github: ghClient ? { owner: ghConfig.owner, repo: ghConfig.repo, ref: ghConfig.ref } : null,
+        async commit(message = 'commit') {
+          const dirty = vfs.list().filter(p => vfs.isDirty(p));
+          const written = flushToDisk(vfs, dirty);
+          writeManifest();
+          if (ghClient && ghConfig) {
+            const srcDirty = dirty.filter(p => p.startsWith('/src/'));
+            if (srcDirty.length > 0) {
+              try {
+                await commitToGitHub(vfs, ghClient, {
+                  owner: ghConfig.owner, repo: ghConfig.repo,
+                  branch: ghConfig.ref, message, pathPrefix: '/src/',
+                }, (ev) => context.emit(ev));
+              } catch { /* logged by commitToGitHub */ }
+            }
+          }
+          for (const p of dirty) vfs.markClean(p);
+          if (written.length > 0) {
+            context.emit({ type: 'progress', message: `flushed ${written.length} files to disk` });
+          }
+          return dirty;
+        },
+      };
+
+      state = {
+        history: savedSession.state?.history || [],
+        turn: savedSession.state?.turn || 0,
+        context,
+      };
+
+      output.write(c('green', '\n  ✓ ') + c('gray', `Session resumed (${state.history.filter(m => m.role === 'user').length} messages)\n`));
+    } else {
+      output.write(c('gray', '\n  Starting fresh session\n'));
+      vfs = null;
+    }
+  }
+
+  // Fresh session if not resumed
+  if (!vfs) {
+    vfs = createVFS();
+    hydrateHarness(vfs);
+    writeManifest();
+  }
 
   // GitHub hydration (if configured)
   if (ghClient && ghConfig) {
@@ -338,54 +415,54 @@ async function repl() {
     }
   }
 
-  const skillIndex = buildSkillIndex(vfs);
+  if (!state) {
+    const skillIndex = buildSkillIndex(vfs);
 
-  const context = {
-    vfs,
-    fetch: (...args) => fetch(...args),
-    emit:  (ev) => ui.emitEvent(ev),
-    env:   {},
-    skillIndex,
-    github: ghClient ? { owner: ghConfig.owner, repo: ghConfig.repo, ref: ghConfig.ref } : null,
-    async commit(message = 'commit') {
-      const dirty = vfs.list().filter(p => vfs.isDirty(p));
-      // Always flush to disk
-      const written = flushToDisk(vfs, dirty);
-      writeManifest();
-      // Also push to GitHub if connected and /src/ files are dirty
-      if (ghClient && ghConfig) {
-        const srcDirty = dirty.filter(p => p.startsWith('/src/'));
-        if (srcDirty.length > 0) {
-          try {
-            await commitToGitHub(vfs, ghClient, {
-              owner: ghConfig.owner, repo: ghConfig.repo,
-              branch: ghConfig.ref, message, pathPrefix: '/src/',
-            }, (ev) => context.emit(ev));
-          } catch (e) {
-            context.emit({ type: 'progress', message: `GitHub push failed: ${e.message}` });
+    const context = {
+      vfs,
+      fetch: (...args) => fetch(...args),
+      emit:  (ev) => ui.emitEvent(ev),
+      env:   {},
+      skillIndex,
+      github: ghClient ? { owner: ghConfig.owner, repo: ghConfig.repo, ref: ghConfig.ref } : null,
+      async commit(message = 'commit') {
+        const dirty = vfs.list().filter(p => vfs.isDirty(p));
+        // Always flush to disk
+        const written = flushToDisk(vfs, dirty);
+        writeManifest();
+        // Also push to GitHub if connected and /src/ files are dirty
+        if (ghClient && ghConfig) {
+          const srcDirty = dirty.filter(p => p.startsWith('/src/'));
+          if (srcDirty.length > 0) {
+            try {
+              await commitToGitHub(vfs, ghClient, {
+                owner: ghConfig.owner, repo: ghConfig.repo,
+                branch: ghConfig.ref, message, pathPrefix: '/src/',
+              }, (ev) => context.emit(ev));
+            } catch (e) {
+              context.emit({ type: 'progress', message: `GitHub push failed: ${e.message}` });
+            }
           }
         }
-      }
-      for (const p of dirty) vfs.markClean(p);
-      context.emit({ type: 'experiment', id: String(Date.now()), kept: true, reason: message });
-      if (written.length > 0) {
-        context.emit({ type: 'progress', message: `flushed ${written.length} files to disk` });
-      }
-      return dirty;
-    },
-  };
+        for (const p of dirty) vfs.markClean(p);
+        context.emit({ type: 'experiment', id: String(Date.now()), kept: true, reason: message });
+        if (written.length > 0) {
+          context.emit({ type: 'progress', message: `flushed ${written.length} files to disk` });
+        }
+        return dirty;
+      },
+    };
 
-  const state = {
-    history: [],
-    turn:    0,
-    context,
-  };
+    state = {
+      history: [],
+      turn:    0,
+      context,
+    };
+  }
 
   const deps = { execute, extractCode, ui, runTurn };
 
   const rsiLog = (msg) => output.write(c('cyan', `  rsi  `) + c('gray', msg) + '\n');
-
-  const rl = readline.createInterface({ input, output, terminal: true });
 
   // Graceful exit
   rl.on('close', () => {
@@ -408,6 +485,12 @@ async function repl() {
     if (msg === ':exit' || msg === ':quit') {
       rl.close();
       break;
+    }
+
+    if (msg === ':reset') {
+      await clearSession();
+      output.write(c('gray', '  session cleared\n'));
+      continue;
     }
 
     if (msg === ':vfs') {

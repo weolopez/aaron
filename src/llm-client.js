@@ -115,6 +115,9 @@ export function createAnthropicClient({
     model,
     provider: 'anthropic',
     async call(messages, system) {
+      if (!resolvedApiKey) {
+        throw new Error('Anthropic API key is not set. Configure ANTHROPIC_API_KEY or use AskArchitect.');
+      }
       const res = await fetch(apiUrl, {
         method: 'POST',
         headers: {
@@ -139,7 +142,9 @@ export function createAnthropicClient({
 // ════════════════════════════════════════════════════
 
 // AskArchitect server configuration
-const ASKARCHITECT_SERVER_URL = 'https://askarchitect-westus3-dev-app-appservice.azurewebsites.net';
+const ASKARCHITECT_SERVER_URL = isBrowser
+  ? ''
+  : 'https://askarchitect-westus3-dev-app-appservice.azurewebsites.net';
 const SSO_TENANT_ID = 'e741d71c-c6b6-47b0-803c-0f3b32b07556';
 const SSO_CLIENT_ID = 'f5df8be3-4473-4c28-b74d-bac0671b4dd8';
 const SSO_SCOPES = 'openid profile offline_access User.Read';
@@ -450,7 +455,8 @@ async function openBrowser(url) {
 }
 
 async function makeServerRequest(session, method, path, body, serverUrl) {
-  const url = `${serverUrl}${path}`;
+  const baseUrl = (serverUrl || '').replace(/\/$/, '');
+  const url = `${baseUrl}${path}`;
   let attempt = 0;
   let currentSession = session;
 
@@ -582,7 +588,8 @@ export function createAskArchitectClient({
  *   - ASKARCHITECT_SESSION: cached session cookie
  */
 export function getLLMClient(options = {}) {
-  const provider = options.provider ?? getToken('LLM_PROVIDER') ?? 'anthropic';
+  const configuredProvider = options.provider ?? getToken('LLM_PROVIDER');
+  const provider = configuredProvider ?? (getToken('ANTHROPIC_API_KEY') ? 'anthropic' : 'askarchitect');
 
   switch (provider) {
     case 'anthropic':
