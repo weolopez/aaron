@@ -22,8 +22,8 @@ ANTHROPIC_API_KEY=sk-ant-... ./aaron
 python3 -m http.server  # then open http://localhost:8000/agent-harness.html
 
 # Validation tests
-node test-hydration.mjs   # verify VFS hydration and module exports
-node test-skills.mjs      # verify skill loading and index building
+node test/test-hydration.mjs   # verify VFS hydration and module exports
+node test/test-skills.mjs      # verify skill loading and index building
 
 # RSI demos
 ANTHROPIC_API_KEY=sk-ant-... node rsi-demo.mjs
