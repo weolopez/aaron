@@ -200,9 +200,11 @@ export async function runWorkflowSteps(wf, wfName, vfs, state, deps, hooks = {})
 
 /**
  * Score a workflow run.
- * Returns { completed, completedSteps, totalSteps, artifactCount, artifactSize, errors }.
+ * Returns { completed, completedSteps, totalSteps, artifactCount, artifactSize, errors, qualityScore }.
+ *
+ * @param {Function|null} scorer - Optional async (goal, artifactMap) → number (0-10)
  */
-async function runWorkflowEval(wfName, wf, state, deps, vfs) {
+async function runWorkflowEval(wfName, wf, state, deps, vfs, scorer = null) {
   // Clear workflow state for a fresh run
   vfs.write(STATE_PATH, 'null');
 
@@ -231,6 +233,13 @@ async function runWorkflowEval(wfName, wf, state, deps, vfs) {
   const artifactSize = newArtifacts.reduce((sum, p) => sum + (vfs.read(p)?.length ?? 0), 0);
   const wfStateNow = loadState(vfs);
 
+  // LLM quality score — optional, falls back to null
+  let qualityScore = null;
+  if (scorer && wf.description && newArtifacts.length > 0) {
+    const artifactMap = Object.fromEntries(newArtifacts.map(p => [p, vfs.read(p) ?? '']));
+    qualityScore = await scorer(wf.description, artifactMap).catch(() => null);
+  }
+
   return {
     completed: allStepsDone,
     completedSteps: wfStateNow?.completedSteps?.length ?? 0,
@@ -238,12 +247,18 @@ async function runWorkflowEval(wfName, wf, state, deps, vfs) {
     artifactCount: newArtifacts.length,
     artifactSize,
     errors,
+    qualityScore,
   };
 }
 
 function workflowIsBetter(baseline, experiment) {
   if (!experiment.completed) return false;
   if (!baseline.completed) return true;
+  // Prefer LLM quality score when both have one
+  if (baseline.qualityScore !== null && experiment.qualityScore !== null) {
+    return experiment.qualityScore > baseline.qualityScore;
+  }
+  // Fall back to artifact count/size heuristic
   if (experiment.artifactCount > baseline.artifactCount) return true;
   if (experiment.artifactCount < baseline.artifactCount) return false;
   if (experiment.artifactSize > baseline.artifactSize) return true;
@@ -252,6 +267,9 @@ function workflowIsBetter(baseline, experiment) {
 }
 
 function buildWorkflowMutatePrompt(wfName, metrics) {
+  const qualityLine = metrics.qualityScore !== null
+    ? `  quality:    ${metrics.qualityScore}/10 (LLM-judged)`
+    : `  quality:    (not scored)`;
   return [
     `Read /workflows/${wfName}.json — this is the current workflow definition.`,
     ``,
@@ -260,6 +278,7 @@ function buildWorkflowMutatePrompt(wfName, metrics) {
     `  steps done: ${metrics.completedSteps}/${metrics.totalSteps}`,
     `  artifacts:  ${metrics.artifactCount} file(s), ${metrics.artifactSize} bytes total`,
     `  errors:     ${metrics.errors}`,
+    qualityLine,
     ``,
     `Improve the workflow so it completes more reliably and produces richer artifacts:`,
     `- Make step prompts more specific — include exact output file paths`,
@@ -285,8 +304,10 @@ function buildWorkflowMutatePrompt(wfName, metrics) {
  * @param {object}   opts.state    — agent state
  * @param {object}   opts.deps     — { runTurn, ... }
  * @param {function} opts.log      — logger
+ * @param {Function|null} opts.scorer — optional async (goal, artifactMap) → number (0-10);
+ *   create with buildWorkflowScorer(llm) from the harness
  */
-export async function runWorkflowRSI({ wfName, budget = 3, state, deps, log }) {
+export async function runWorkflowRSI({ wfName, budget = 3, state, deps, log, scorer = null }) {
   log = log ?? (() => {});
   const { vfs } = state.context;
   const wfPath = `/workflows/${wfName}.json`;
@@ -312,8 +333,9 @@ export async function runWorkflowRSI({ wfName, budget = 3, state, deps, log }) {
     state.history = [];
     state.turn = 0;
     log('running baseline eval...');
-    const baseline = await runWorkflowEval(wfName, wf, state, deps, vfs);
-    log(`baseline: completed=${baseline.completed} steps=${baseline.completedSteps}/${baseline.totalSteps} artifacts=${baseline.artifactCount} size=${baseline.artifactSize} errors=${baseline.errors}`);
+    const baseline = await runWorkflowEval(wfName, wf, state, deps, vfs, scorer);
+    const bQuality = baseline.qualityScore !== null ? ` quality=${baseline.qualityScore}/10` : '';
+    log(`baseline: completed=${baseline.completed} steps=${baseline.completedSteps}/${baseline.totalSteps} artifacts=${baseline.artifactCount} size=${baseline.artifactSize} errors=${baseline.errors}${bQuality}`);
 
     // Mutation turn
     state.history = [];
@@ -345,13 +367,17 @@ export async function runWorkflowRSI({ wfName, budget = 3, state, deps, log }) {
     state.history = [];
     state.turn = 0;
     log('running experiment eval...');
-    const experiment = await runWorkflowEval(wfName, mutated, state, deps, vfs);
-    log(`experiment: completed=${experiment.completed} steps=${experiment.completedSteps}/${experiment.totalSteps} artifacts=${experiment.artifactCount} size=${experiment.artifactSize} errors=${experiment.errors}`);
+    const experiment = await runWorkflowEval(wfName, mutated, state, deps, vfs, scorer);
+    const eQuality = experiment.qualityScore !== null ? ` quality=${experiment.qualityScore}/10` : '';
+    log(`experiment: completed=${experiment.completed} steps=${experiment.completedSteps}/${experiment.totalSteps} artifacts=${experiment.artifactCount} size=${experiment.artifactSize} errors=${experiment.errors}${eQuality}`);
 
     const kept = workflowIsBetter(baseline, experiment);
+    const qualityDelta = (baseline.qualityScore !== null && experiment.qualityScore !== null)
+      ? `, quality ${baseline.qualityScore}→${experiment.qualityScore}/10`
+      : '';
     const reason = kept
-      ? `improved: artifacts ${baseline.artifactCount}→${experiment.artifactCount}, size ${baseline.artifactSize}→${experiment.artifactSize}`
-      : `reverted: artifacts ${baseline.artifactCount}→${experiment.artifactCount}, size ${baseline.artifactSize}→${experiment.artifactSize}`;
+      ? `improved: artifacts ${baseline.artifactCount}→${experiment.artifactCount}, size ${baseline.artifactSize}→${experiment.artifactSize}${qualityDelta}`
+      : `reverted: artifacts ${baseline.artifactCount}→${experiment.artifactCount}, size ${baseline.artifactSize}→${experiment.artifactSize}${qualityDelta}`;
 
     if (!kept) {
       vfs.write(wfPath, snap);
@@ -376,4 +402,49 @@ export async function runWorkflowRSI({ wfName, budget = 3, state, deps, log }) {
 
   log(`\n═══ WORKFLOW RSI COMPLETE: ${results.filter(r => r.kept).length}/${results.length} kept ═══\n`);
   return results;
+}
+
+// ════════════════════════════════════════════════════
+// LLM SCORER FACTORY
+// ════════════════════════════════════════════════════
+
+/**
+ * Build an LLM-based quality scorer for workflow RSI.
+ *
+ * @param {object} llm — LLM client with .call(messages, system) method
+ * @returns {Function} async (goal, artifactMap) → number (0-10)
+ *
+ * Usage:
+ *   import { getLLMClient } from './llm-client.js';
+ *   const scorer = buildWorkflowScorer(getLLMClient());
+ *   await runWorkflowRSI({ ..., scorer });
+ */
+export function buildWorkflowScorer(llm) {
+  return async function scorer(goal, artifactMap) {
+    const entries = Object.entries(artifactMap);
+    if (entries.length === 0) return 0;
+
+    // Truncate each artifact to keep the prompt manageable
+    const preview = entries
+      .map(([p, t]) => `### ${p}\n${t.slice(0, 2000)}${t.length > 2000 ? '\n[truncated]' : ''}`)
+      .join('\n\n');
+
+    const data = await llm.call(
+      [{
+        role: 'user',
+        content: `Workflow goal: ${goal}\n\nArtifacts produced:\n${preview}\n\nRate the quality of these artifacts on a scale of 0-10:\n- 0: nothing useful produced\n- 5: partial, some requirements met\n- 10: fully meets the goal with high quality\n\nRespond ONLY with JSON: {"score": <number>, "reason": "<one sentence>"}`,
+      }],
+      'You are an objective evaluator of automated agent workflow outputs. Be concise and fair.'
+    );
+
+    const text = data?.content?.[0]?.text ?? '{}';
+    const match = text.match(/\{[\s\S]*?\}/);
+    if (!match) return 5;
+    try {
+      const parsed = JSON.parse(match[0]);
+      return typeof parsed.score === 'number' ? Math.max(0, Math.min(10, parsed.score)) : 5;
+    } catch {
+      return 5;
+    }
+  };
 }

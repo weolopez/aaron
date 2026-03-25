@@ -594,7 +594,7 @@ export function getLLMClient(options = {}) {
   switch (provider) {
     case 'anthropic':
       return createAnthropicClient({
-        model: options.model ?? getToken('ANTHROPIC_MODEL') ?? 'claude-haiku-4-5',
+        model: options.model ?? getToken('ANTHROPIC_MODEL') ?? 'claude-sonnet-4-6',
         apiKey: options.apiKey,
         ...options,
       });

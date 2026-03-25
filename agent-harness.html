@@ -730,7 +730,8 @@ import { createVFS, execute, extractCode } from './src/agent-core.js';
 import { runTurn, buildSkillIndex } from './src/agent-loop.js';
 import { createGitHubClient, initFromGitHub, commitToGitHub, parseGitHubRepo } from './src/github.js';
 import { loadSession, saveSession, clearSession } from './src/session.js';
-import { buildCreatePrompt, buildImprovePrompt, listWorkflows, runWorkflowSteps, runWorkflowRSI } from './src/workflow-runner.js';
+import { buildCreatePrompt, buildImprovePrompt, listWorkflows, runWorkflowSteps, runWorkflowRSI, buildWorkflowScorer } from './src/workflow-runner.js';
+import { getLLMClient } from './src/llm-client.js';
 
 // ════════════════════════════════════════════════════
 // CONFIG
@@ -1141,7 +1142,7 @@ const agentState = {
   },
 };
 
-const deps = { execute, extractCode, ui };
+const deps = { execute, extractCode, ui, runTurn };
 
 // Hydrate harness files into VFS, then auto-connect GitHub if credentials are saved
 hydrateHarness(vfs).then(async () => {
@@ -1279,8 +1280,9 @@ async function handleSend() {
         ui.addSysMsg(`Workflow "${wfRsiName}" not found.\n\nCreate it first:\n  :workflow create ${wfRsiName} <goal>`);
         return;
       }
-      ui.addSysMsg(`Workflow RSI: ${wfRsiName} — ${budget} experiments…`);
-      const results = await runWorkflowRSI({ wfName: wfRsiName, budget, state: agentState, deps });
+      ui.addSysMsg(`Workflow RSI: ${wfRsiName} — ${budget} experiments (LLM scoring)…`);
+      const scorer = buildWorkflowScorer(getLLMClient());
+      const results = await runWorkflowRSI({ wfName: wfRsiName, budget, state: agentState, deps, scorer });
       const kept = results.filter(r => r.kept).length;
       ui.addSysMsg(`Workflow RSI complete: ${kept}/${results.length} experiments kept`);
       return;

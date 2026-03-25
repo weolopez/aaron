@@ -19,7 +19,8 @@ import { runTurn, buildSkillIndex } from './src/agent-loop.js';
 import { runRSI, runSkillRSI } from './src/agent-rsi.js';
 import { createGitHubClient, initFromGitHub, commitToGitHub, parseGitHubRepo } from './src/github.js';
 import { loadSession, saveSession, clearSession } from './src/session.js';
-import { buildCreatePrompt, buildImprovePrompt, listWorkflows, runWorkflowSteps, runWorkflowRSI } from './src/workflow-runner.js';
+import { buildCreatePrompt, buildImprovePrompt, listWorkflows, runWorkflowSteps, runWorkflowRSI, buildWorkflowScorer } from './src/workflow-runner.js';
+import { getLLMClient } from './src/llm-client.js';
 
 // ════════════════════════════════════════════════════
 // .env loader (zero deps)
@@ -768,8 +769,9 @@ async function repl() {
           output.write(c('gray', `  Create it first: :workflow create ${wfRsiName} <goal>\n`));
           continue;
         }
-        output.write('\n' + c('cyan', `  Workflow RSI: ${wfRsiName} (${budget} experiments)`) + '\n');
-        const results = await runWorkflowRSI({ wfName: wfRsiName, budget, state, deps, log: rsiLog });
+        output.write('\n' + c('cyan', `  Workflow RSI: ${wfRsiName} (${budget} experiments, LLM scoring enabled)`) + '\n');
+        const scorer = buildWorkflowScorer(getLLMClient());
+        const results = await runWorkflowRSI({ wfName: wfRsiName, budget, state, deps, log: rsiLog, scorer });
         const kept = results.filter(r => r.kept).length;
         output.write('\n' + c('cyan', `  Workflow RSI complete: ${kept}/${results.length} experiments kept`) + '\n');
         const journal = vfs.read('/memory/experiments.jsonl');
