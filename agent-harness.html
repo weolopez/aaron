@@ -730,7 +730,7 @@ import { createVFS, execute, extractCode } from './src/agent-core.js';
 import { runTurn, buildSkillIndex } from './src/agent-loop.js';
 import { createGitHubClient, initFromGitHub, commitToGitHub, parseGitHubRepo } from './src/github.js';
 import { loadSession, saveSession, clearSession } from './src/session.js';
-import { buildCreatePrompt, buildImprovePrompt, listWorkflows, runWorkflowSteps } from './src/workflow-runner.js';
+import { buildCreatePrompt, buildImprovePrompt, listWorkflows, runWorkflowSteps, runWorkflowRSI } from './src/workflow-runner.js';
 
 // ════════════════════════════════════════════════════
 // CONFIG
@@ -1175,9 +1175,10 @@ hydrateHarness(vfs).then(async () => {
     ui.addSysMsg(
       'Harness ready.' + extra + '\n\n' +
       'Commands: :vfs  :cat /path  :workflow\n' +
-      '  :workflow create <name> <goal>     — define a new workflow\n' +
-      '  :workflow improve <name> <feedback>— revise step prompts\n' +
-      '  :workflow <name>                   — run it\n\n' +
+      '  :workflow create <name> <goal>      — define a new workflow\n' +
+      '  :workflow improve <name> <feedback> — revise step prompts\n' +
+      '  :workflow rsi <name> [budget]       — iterate definition\n' +
+      '  :workflow <name>                    — run it\n\n' +
       'Connect GitHub to sync workflows and memory across sessions.'
     );
   }
@@ -1234,7 +1235,7 @@ async function handleSend() {
                        : 'not started';
           return `${wf.name}  [${status}]${wf.description ? '\n  ' + wf.description : ''}`;
         });
-        ui.addSysMsg('Workflows:\n' + lines.join('\n\n') + '\n\n:workflow <name>                   — run\n:workflow create <name> <goal>     — create new\n:workflow improve <name> <feedback>— revise steps');
+        ui.addSysMsg('Workflows:\n' + lines.join('\n\n') + '\n\n:workflow <name>                    — run\n:workflow create <name> <goal>      — create new\n:workflow improve <name> <feedback> — revise steps\n:workflow rsi <name> [budget]       — iterate definition');
       }
       return;
     }
@@ -1267,6 +1268,24 @@ async function handleSend() {
       return;
     }
 
+    // ── :workflow rsi <name> [budget] ──
+    if (args.startsWith('rsi ')) {
+      const rest = args.slice(4).trim();
+      const parts = rest.split(/\s+/);
+      const wfRsiName = parts[0];
+      const budget = parseInt(parts[1], 10) || 3;
+      if (!wfRsiName) { ui.addSysMsg('Usage: :workflow rsi <name> [budget]'); return; }
+      if (!vfs.read(`/workflows/${wfRsiName}.json`)) {
+        ui.addSysMsg(`Workflow "${wfRsiName}" not found.\n\nCreate it first:\n  :workflow create ${wfRsiName} <goal>`);
+        return;
+      }
+      ui.addSysMsg(`Workflow RSI: ${wfRsiName} — ${budget} experiments…`);
+      const results = await runWorkflowRSI({ wfName: wfRsiName, budget, state: agentState, deps });
+      const kept = results.filter(r => r.kept).length;
+      ui.addSysMsg(`Workflow RSI complete: ${kept}/${results.length} experiments kept`);
+      return;
+    }
+
     // ── :workflow <name> — run or resume ──
     const wfName = args;
     const wfRaw = vfs.read(`/workflows/${wfName}.json`);
@@ -1281,9 +1300,18 @@ async function handleSend() {
     ui.addSysMsg(`Workflow: ${wfName} (${doneCount}/${wf.steps.length} steps done). Running steps…`);
 
     await runWorkflowSteps(wf, wfName, vfs, agentState, deps, {
-      onStepDone:    (id) => ui.addSysMsg(`✓ [${id}] complete`),
-      onComplete:    (name) => ui.addSysMsg(`✅ Workflow "${name}" complete!`),
-      onUserMsg:     (text) => ui.addUserMsg(`[step] ${text.slice(0, 100)}…`),
+      onStepDone: (id) => {
+        ui.addSysMsg(`✓ [${id}] complete`);
+        // Auto-preview latest artifact from this workflow
+        const artifactPaths = vfs.list().filter(p => p.startsWith(`/artifacts/${wfName}/`) && isPreviewable(p));
+        if (artifactPaths.length > 0) {
+          refreshPreviewSelect();
+          previewSelect.value = artifactPaths[artifactPaths.length - 1];
+          renderPreview();
+        }
+      },
+      onComplete: (name) => ui.addSysMsg(`✅ Workflow "${name}" complete!`),
+      onUserMsg:  (text) => ui.addUserMsg(`[step] ${text.slice(0, 100)}…`),
     });
     return;
   }

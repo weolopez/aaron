@@ -19,7 +19,7 @@ import { runTurn, buildSkillIndex } from './src/agent-loop.js';
 import { runRSI, runSkillRSI } from './src/agent-rsi.js';
 import { createGitHubClient, initFromGitHub, commitToGitHub, parseGitHubRepo } from './src/github.js';
 import { loadSession, saveSession, clearSession } from './src/session.js';
-import { buildCreatePrompt, buildImprovePrompt, listWorkflows, runWorkflowSteps } from './src/workflow-runner.js';
+import { buildCreatePrompt, buildImprovePrompt, listWorkflows, runWorkflowSteps, runWorkflowRSI } from './src/workflow-runner.js';
 
 // ════════════════════════════════════════════════════
 // .env loader (zero deps)
@@ -179,10 +179,11 @@ const ui = {
     output.write(c('gray', '  Commands:\n'));
     output.write(c('gray', '  :vfs            — list VFS contents\n'));
     output.write(c('gray', '  :cat /path      — show a file\n'));
-    output.write(c('gray', '  :workflow                         — list workflows\n'));
-    output.write(c('gray', '  :workflow create <name> <goal>    — create workflow definition\n'));
-    output.write(c('gray', '  :workflow improve <name> <feedback>— revise step prompts\n'));
-    output.write(c('gray', '  :workflow <name>                  — run or resume a workflow\n'));
+    output.write(c('gray', '  :workflow                           — list workflows\n'));
+    output.write(c('gray', '  :workflow create <name> <goal>      — create workflow definition\n'));
+    output.write(c('gray', '  :workflow improve <name> <feedback> — revise step prompts\n'));
+    output.write(c('gray', '  :workflow rsi <name> [budget]       — iterate workflow definition\n'));
+    output.write(c('gray', '  :workflow <name>                    — run or resume a workflow\n'));
     output.write(c('gray', '  :rsi            — run RSI experiment loop\n'));
     output.write(c('gray', '  :skill          — run skill RSI experiment loop\n'));
     output.write(c('gray', '  :clear          — reset conversation history\n'));
@@ -711,9 +712,10 @@ async function repl() {
             output.write(c('gray', `    ${wf.name}`) + '  ' + statusStr + '\n');
             if (wf.description) output.write(c('gray', `      ${wf.description}\n`));
           }
-          output.write(c('gray', '\n  :workflow <name>                   — run\n'));
-          output.write(c('gray', '  :workflow create <name> <goal>     — create new\n'));
-          output.write(c('gray', '  :workflow improve <name> <feedback>— revise steps\n'));
+          output.write(c('gray', '\n  :workflow <name>                    — run\n'));
+          output.write(c('gray', '  :workflow create <name> <goal>      — create new\n'));
+          output.write(c('gray', '  :workflow improve <name> <feedback> — revise steps\n'));
+          output.write(c('gray', '  :workflow rsi <name> [budget]       — iterate definition\n'));
         }
         output.write('\n');
         continue;
@@ -751,6 +753,28 @@ async function repl() {
         }
         ui.user(`:workflow improve ${wfName} "${feedback}"`);
         await runTurn(buildImprovePrompt(wfName, feedback), state, deps);
+        continue;
+      }
+
+      // ── :workflow rsi <name> [budget] ──
+      if (args.startsWith('rsi ')) {
+        const rest = args.slice(4).trim();
+        const parts = rest.split(/\s+/);
+        const wfRsiName = parts[0];
+        const budget = parseInt(parts[1], 10) || 3;
+        if (!wfRsiName) { output.write(c('red', '  Usage: :workflow rsi <name> [budget]\n')); continue; }
+        if (!vfs.read(`/workflows/${wfRsiName}.json`)) {
+          output.write(c('red', `  Workflow "${wfRsiName}" not found.\n`));
+          output.write(c('gray', `  Create it first: :workflow create ${wfRsiName} <goal>\n`));
+          continue;
+        }
+        output.write('\n' + c('cyan', `  Workflow RSI: ${wfRsiName} (${budget} experiments)`) + '\n');
+        const results = await runWorkflowRSI({ wfName: wfRsiName, budget, state, deps, log: rsiLog });
+        const kept = results.filter(r => r.kept).length;
+        output.write('\n' + c('cyan', `  Workflow RSI complete: ${kept}/${results.length} experiments kept`) + '\n');
+        const journal = vfs.read('/memory/experiments.jsonl');
+        if (journal) output.write(c('gray', `  experiments.jsonl: ${journal.split('\n').filter(Boolean).length} entries\n`));
+        ui.hr();
         continue;
       }
 

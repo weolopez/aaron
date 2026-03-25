@@ -113,6 +113,8 @@ export async function runWorkflowSteps(wf, wfName, vfs, state, deps, hooks = {})
 
   const { runTurn } = deps;
 
+  const HISTORY_PATH = '/memory/agent-history.json';
+
   // Load or init checkpoint
   let wfState = loadState(vfs);
   if (!wfState || wfState.workflow !== wfName) {
@@ -124,6 +126,12 @@ export async function runWorkflowSteps(wf, wfName, vfs, state, deps, hooks = {})
       outputs: {},
     };
     vfs.write(STATE_PATH, JSON.stringify(wfState, null, 2));
+  } else {
+    // Resuming — restore conversation history if saved
+    const savedHistory = vfs.read(HISTORY_PATH);
+    if (savedHistory && state.history.length === 0) {
+      try { state.history = JSON.parse(savedHistory); } catch { /* ignore */ }
+    }
   }
 
   for (const step of wf.steps) {
@@ -138,11 +146,13 @@ export async function runWorkflowSteps(wf, wfName, vfs, state, deps, hooks = {})
     wfState.currentStep = step.id;
     vfs.write(STATE_PATH, JSON.stringify(wfState, null, 2));
 
-    // Build turn prompt — prepend skill instructions if referenced
+    // Build turn prompt — inject full skill instructions if referenced
     let turnPrompt = step.prompt;
     if (step.skill) {
       const skillMd = vfs.read(`/skills/${step.skill}/SKILL.md`);
-      if (skillMd) turnPrompt = `Use the "${step.skill}" skill for this step.\n\n${step.prompt}`;
+      if (skillMd) {
+        turnPrompt = `## Skill: ${step.skill}\n\nFollow these skill instructions exactly:\n\n${skillMd}\n\n## Task\n\n${step.prompt}`;
+      }
     }
 
     // Append checkpoint + commit instructions
@@ -175,8 +185,195 @@ export async function runWorkflowSteps(wf, wfName, vfs, state, deps, hooks = {})
       onCheckpointUpdated(step.id);
     }
 
+    // Persist conversation history so resumption has full context
+    vfs.write(HISTORY_PATH, JSON.stringify(state.history));
+
     onStepDone(step.id);
   }
 
   onComplete(wfName);
+}
+
+// ════════════════════════════════════════════════════
+// WORKFLOW RSI
+// ════════════════════════════════════════════════════
+
+/**
+ * Score a workflow run.
+ * Returns { completed, completedSteps, totalSteps, artifactCount, artifactSize, errors }.
+ */
+async function runWorkflowEval(wfName, wf, state, deps, vfs) {
+  // Clear workflow state for a fresh run
+  vfs.write(STATE_PATH, 'null');
+
+  const artifactPrefix = `/artifacts/${wfName}/`;
+  const beforeSet = new Set(vfs.list().filter(p => p.startsWith(artifactPrefix)));
+
+  let allStepsDone = false;
+  let errors = 0;
+
+  const origEmit = state.context.emit;
+  state.context.emit = (ev) => {
+    if (ev.type === 'error') errors++;
+    origEmit(ev);
+  };
+
+  try {
+    await runWorkflowSteps(wf, wfName, vfs, state, deps, {
+      onComplete: () => { allStepsDone = true; },
+    });
+  } catch { /* step loop failed */ } finally {
+    state.context.emit = origEmit;
+  }
+
+  const afterArtifacts = vfs.list().filter(p => p.startsWith(artifactPrefix));
+  const newArtifacts = afterArtifacts.filter(p => !beforeSet.has(p));
+  const artifactSize = newArtifacts.reduce((sum, p) => sum + (vfs.read(p)?.length ?? 0), 0);
+  const wfStateNow = loadState(vfs);
+
+  return {
+    completed: allStepsDone,
+    completedSteps: wfStateNow?.completedSteps?.length ?? 0,
+    totalSteps: wf.steps.length,
+    artifactCount: newArtifacts.length,
+    artifactSize,
+    errors,
+  };
+}
+
+function workflowIsBetter(baseline, experiment) {
+  if (!experiment.completed) return false;
+  if (!baseline.completed) return true;
+  if (experiment.artifactCount > baseline.artifactCount) return true;
+  if (experiment.artifactCount < baseline.artifactCount) return false;
+  if (experiment.artifactSize > baseline.artifactSize) return true;
+  if (experiment.artifactSize < baseline.artifactSize) return false;
+  return experiment.errors <= baseline.errors;
+}
+
+function buildWorkflowMutatePrompt(wfName, metrics) {
+  return [
+    `Read /workflows/${wfName}.json — this is the current workflow definition.`,
+    ``,
+    `Last run metrics:`,
+    `  completed:  ${metrics.completed}`,
+    `  steps done: ${metrics.completedSteps}/${metrics.totalSteps}`,
+    `  artifacts:  ${metrics.artifactCount} file(s), ${metrics.artifactSize} bytes total`,
+    `  errors:     ${metrics.errors}`,
+    ``,
+    `Improve the workflow so it completes more reliably and produces richer artifacts:`,
+    `- Make step prompts more specific — include exact output file paths`,
+    `- If a step is too vague, add directive instructions or split it`,
+    `- Ensure each step has one clear, measurable deliverable`,
+    `- Keep 3-6 steps; merge trivial steps, split overloaded ones`,
+    ``,
+    `Write the improved workflow back to /workflows/${wfName}.json.`,
+    `Do NOT execute the steps — only improve the definition.`,
+    `context.emit({ type: 'done', message: 'Workflow improved' })`,
+  ].join('\n');
+}
+
+/**
+ * Run the workflow RSI loop — iterates on the workflow JSON definition.
+ *
+ * Each experiment: run the workflow baseline → ask agent to improve the definition
+ * → run experiment → keep/discard based on artifact quality.
+ *
+ * @param {object} opts
+ * @param {string}   opts.wfName   — workflow name
+ * @param {number}   opts.budget   — max experiments (default 3)
+ * @param {object}   opts.state    — agent state
+ * @param {object}   opts.deps     — { runTurn, ... }
+ * @param {function} opts.log      — logger
+ */
+export async function runWorkflowRSI({ wfName, budget = 3, state, deps, log }) {
+  log = log ?? (() => {});
+  const { vfs } = state.context;
+  const wfPath = `/workflows/${wfName}.json`;
+  const results = [];
+
+  log(`\n═══ WORKFLOW RSI: ${wfName} — ${budget} experiments ═══\n`);
+
+  for (let i = 0; i < budget; i++) {
+    log(`\n─── experiment ${i + 1}/${budget} ───\n`);
+
+    const wfRaw = vfs.read(wfPath);
+    if (!wfRaw) { log('workflow not found — aborting'); break; }
+    let wf;
+    try { wf = JSON.parse(wfRaw); }
+    catch { log('invalid workflow JSON — aborting'); break; }
+
+    // Snapshot
+    const snap = wfRaw;
+    const savedHistory = [...state.history];
+    const savedTurn = state.turn;
+
+    // Baseline eval
+    state.history = [];
+    state.turn = 0;
+    log('running baseline eval...');
+    const baseline = await runWorkflowEval(wfName, wf, state, deps, vfs);
+    log(`baseline: completed=${baseline.completed} steps=${baseline.completedSteps}/${baseline.totalSteps} artifacts=${baseline.artifactCount} size=${baseline.artifactSize} errors=${baseline.errors}`);
+
+    // Mutation turn
+    state.history = [];
+    state.turn = 0;
+    log('asking agent to improve workflow...');
+    await deps.runTurn(buildWorkflowMutatePrompt(wfName, baseline), state, deps);
+
+    // Validate mutation
+    const mutatedRaw = vfs.read(wfPath);
+    let mutated;
+    const discard = (reason) => {
+      vfs.write(wfPath, snap);
+      state.history = savedHistory;
+      state.turn = savedTurn;
+      const entry = { ts: new Date().toISOString(), kept: false, reason, target: `workflow:${wfName}`, baseline: null, experiment: null };
+      const existing = vfs.read('/memory/experiments.jsonl') ?? '';
+      vfs.write('/memory/experiments.jsonl', existing + JSON.stringify(entry) + '\n');
+      state.context.emit({ type: 'experiment', id: entry.ts, kept: false, reason });
+      results.push({ kept: false, reason });
+    };
+
+    if (!mutatedRaw) { log('workflow deleted — discarding'); discard('workflow deleted'); continue; }
+    try { mutated = JSON.parse(mutatedRaw); }
+    catch { log('invalid JSON after mutation — discarding'); discard('invalid JSON'); continue; }
+    if (!mutated.steps?.length) { log('no steps after mutation — discarding'); discard('no steps'); continue; }
+    log('mutation validated ✓');
+
+    // Experiment eval
+    state.history = [];
+    state.turn = 0;
+    log('running experiment eval...');
+    const experiment = await runWorkflowEval(wfName, mutated, state, deps, vfs);
+    log(`experiment: completed=${experiment.completed} steps=${experiment.completedSteps}/${experiment.totalSteps} artifacts=${experiment.artifactCount} size=${experiment.artifactSize} errors=${experiment.errors}`);
+
+    const kept = workflowIsBetter(baseline, experiment);
+    const reason = kept
+      ? `improved: artifacts ${baseline.artifactCount}→${experiment.artifactCount}, size ${baseline.artifactSize}→${experiment.artifactSize}`
+      : `reverted: artifacts ${baseline.artifactCount}→${experiment.artifactCount}, size ${baseline.artifactSize}→${experiment.artifactSize}`;
+
+    if (!kept) {
+      vfs.write(wfPath, snap);
+      log('discarded — workflow restored');
+    } else {
+      if (state.context.commit) await state.context.commit(`workflow RSI: ${wfName} — ${reason}`);
+      log('kept — workflow improved and committed');
+    }
+
+    const entry = { ts: new Date().toISOString(), kept, reason, target: `workflow:${wfName}`, baseline, experiment };
+    const existing = vfs.read('/memory/experiments.jsonl') ?? '';
+    vfs.write('/memory/experiments.jsonl', existing + JSON.stringify(entry) + '\n');
+    state.context.emit({ type: 'experiment', id: entry.ts, kept, reason });
+
+    state.history = savedHistory;
+    state.turn = savedTurn;
+    results.push({ kept, baseline, experiment, reason });
+
+    const keptCount = results.filter(r => r.kept).length;
+    log(`running total: ${keptCount} kept, ${results.length - keptCount} discarded`);
+  }
+
+  log(`\n═══ WORKFLOW RSI COMPLETE: ${results.filter(r => r.kept).length}/${results.length} kept ═══\n`);
+  return results;
 }
