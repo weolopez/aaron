@@ -780,6 +780,16 @@ async function repl() {
         ui.user(turnPrompt);
         await runTurn(turnPrompt, state, deps);
 
+        // Continuation pass: verify step completion and fill any gaps
+        output.write(c('gray', `  ↺ [${step.id}] verifying...\n`));
+        await runTurn(
+          `You just ran step "${step.id}". Its task was:\n${step.prompt}\n\n` +
+          `Call context.vfs.list() and verify every file or output the step required now exists. ` +
+          `If anything is missing or incomplete, write it now. ` +
+          `context.emit({ type: 'done', message: 'Step ${step.id} verified' })`,
+          state, deps
+        );
+
         // Read updated state after the step ran
         const updatedRaw = vfs.read(statePath);
         if (updatedRaw) {
@@ -1137,6 +1147,16 @@ async function workflowRun(wfName) {
 3. context.emit({ type: 'done', message: 'Step ${step.id} complete' })`;
 
     await runTurn(turnPrompt, state, deps);
+
+    // Continuation pass: verify step completion and fill any gaps
+    output.write(c('gray', `  ↺ [${step.id}] verifying...\n`));
+    await runTurn(
+      `You just ran step "${step.id}". Its task was:\n${step.prompt}\n\n` +
+      `Call context.vfs.list() and verify every file or output the step required now exists. ` +
+      `If anything is missing or incomplete, write it now. ` +
+      `context.emit({ type: 'done', message: 'Step ${step.id} verified' })`,
+      state, deps
+    );
 
     const updatedRaw = vfs.read(statePath);
     if (updatedRaw) { try { wfState = JSON.parse(updatedRaw); } catch {} }

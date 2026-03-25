@@ -1,0 +1,21 @@
+{
+  "name": "devkit",
+  "goal": "Compose a developer toolkit by executing the texttools and gitreport workflows as sub-tasks, then building a unified launcher",
+  "steps": [
+    {
+      "id": "execute-sub-workflows",
+      "skill": null,
+      "prompt": "Read /workflows/texttools.json and /workflows/gitreport.json — both are workflow definitions with a 'steps' array where each step has an 'id' and 'prompt' field.\n\nYour job: execute BOTH workflows' steps yourself, producing all their outputs under a shared directory:\n  /artifacts/devkit/texttools/  — all texttools artifacts (package.json, src/index.js, src/commands.js)\n  /artifacts/devkit/gitreport/  — all gitreport artifacts (cli.js, report-generator.js, index.js)\n\nProcess each workflow's steps in order. For each step, read its prompt and implement what it describes, writing files to the devkit subdirectory instead of the original artifacts path.\n\nThis proves workflow composition: one agent turn executing multiple workflow definitions."
+    },
+    {
+      "id": "build-unified-launcher",
+      "skill": null,
+      "prompt": "Read /artifacts/devkit/texttools/ and /artifacts/devkit/gitreport/ to see what was built.\n\nCreate /artifacts/devkit/index.html — a unified developer toolkit landing page that:\n- Shows both tools side by side in a clean two-column layout\n- Documents every command for texttools (wc, grep, upper, lower, wrap)\n- Documents gitreport usage and what the HTML report contains\n- Has a 'Quick Start' section with copy-paste shell commands for each tool\n- Links to the gitreport HTML report if present\n- Visually polished: use a professional dark sidebar nav + main content layout\n\nEmbed all CSS and JS. No external files."
+    },
+    {
+      "id": "verify-composition",
+      "skill": null,
+      "prompt": "Verify Option C workflow composition worked:\n1. List all files under /artifacts/devkit/ — there should be files in both texttools/ and gitreport/ subdirs plus index.html\n2. Read /artifacts/devkit/texttools/src/index.js — confirm it's functional\n3. Read /artifacts/devkit/index.html — confirm it documents both tools\n\nEmit a summary: context.emit({ type: 'done', message: 'devkit composed from 2 sub-workflows: ' + fileList })"
+    }
+  ]
+}

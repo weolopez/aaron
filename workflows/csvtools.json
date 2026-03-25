@@ -1,0 +1,21 @@
+{
+  "name": "csvtools",
+  "goal": "Build a Node.js CSV processing CLI with demo page, using texttools as architectural reference",
+  "steps": [
+    {
+      "id": "read-reference-and-build-cli",
+      "skill": null,
+      "prompt": "Read /workflows/texttools.json — that file describes how a Node.js CLI was structured with package.json, src/index.js, and src/commands.js. Use the EXACT same architectural pattern to build a CSV processing CLI at /artifacts/csvtools/.\n\nThe CSV CLI must have these commands:\n  count   — print row count and column count of a CSV from stdin\n  headers — print the column names, one per line\n  select  — filter to specific columns: echo data | node src/index.js select col1,col2\n  filter  — keep rows where a column matches a value: node src/index.js filter name=Alice\n  stats   — for each numeric column print min, max, avg\n\nFollow the texttools pattern exactly:\n  /artifacts/csvtools/package.json  — name csvtools, version 1.0.0, bin pointing to src/index.js\n  /artifacts/csvtools/src/index.js  — arg parsing, stdin reading, dispatch to commands\n  /artifacts/csvtools/src/commands.js — all five command implementations\n\nThe CLI reads CSV from stdin. All commands must handle quoted fields and commas inside quotes.\nWrite all three files."
+    },
+    {
+      "id": "build-demo-page",
+      "skill": null,
+      "prompt": "Read /artifacts/csvtools/src/commands.js and /artifacts/csvtools/src/index.js to understand what was built.\n\nCreate a single self-contained HTML file at /artifacts/csvtools/index.html that:\n- Embeds a sample CSV dataset (at least 10 rows, 5 columns — use realistic data like sales records)\n- Has a live demo UI: user picks a command from a dropdown, enters optional args, clicks Run\n- Executes the command logic IN THE BROWSER (port the JS commands.js logic inline)\n- Shows output in a styled pre block\n- Documents all 5 commands with examples\n\nEmbed all CSS and JavaScript inside the HTML file — no external files.\nMake it visually polished with a dark code theme for output."
+    },
+    {
+      "id": "verify",
+      "skill": null,
+      "prompt": "Verify the csvtools project is complete:\n1. Read /artifacts/csvtools/src/index.js — confirm it handles all 5 commands\n2. Read /artifacts/csvtools/src/commands.js — confirm parseCSV handles quoted fields\n3. Read /artifacts/csvtools/index.html — confirm it has embedded CSS+JS and the live demo\n\nIf anything is missing or broken, fix it now.\n\nThen emit: context.emit({ type: 'done', message: 'csvtools complete: CLI at artifacts/csvtools/src/, demo at artifacts/csvtools/index.html' })"
+    }
+  ]
+}
