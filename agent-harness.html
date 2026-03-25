@@ -729,6 +729,8 @@ textarea#input::placeholder { color: var(--dim); }
 import { createVFS, execute, extractCode } from './src/agent-core.js';
 import { runTurn, buildSkillIndex } from './src/agent-loop.js';
 import { createGitHubClient, initFromGitHub, commitToGitHub, parseGitHubRepo } from './src/github.js';
+import { loadSession, saveSession, clearSession } from './src/session.js';
+import { buildCreatePrompt, buildImprovePrompt, listWorkflows, runWorkflowSteps } from './src/workflow-runner.js';
 
 // ════════════════════════════════════════════════════
 // CONFIG
@@ -1222,20 +1224,15 @@ async function handleSend() {
 
     // ── :workflow list (or bare :workflow) ──
     if (!args || args === 'list') {
-      const wfPaths = vfs.list().filter(p => p.startsWith('/workflows/') && p.endsWith('.json'));
-      if (wfPaths.length === 0) {
+      const workflows = listWorkflows(vfs);
+      if (workflows.length === 0) {
         ui.addSysMsg('No workflows yet.\n\nCreate one:\n  :workflow create <name> <goal description>');
       } else {
-        const stateRaw = vfs.read('/scratch/workflow-state.json');
-        const wfState = stateRaw ? (() => { try { return JSON.parse(stateRaw); } catch { return null; } })() : null;
-        const lines = wfPaths.map(p => {
-          try {
-            const wf = JSON.parse(vfs.read(p));
-            const active = wfState?.workflow === wf.name;
-            const done = active && wfState?.completedSteps?.length === wf.steps?.length;
-            const status = active ? (done ? '✓ complete' : `step: ${wfState.currentStep}`) : 'not started';
-            return `${wf.name}  [${status}]${wf.description ? '\n  ' + wf.description : ''}`;
-          } catch { return p; }
+        const lines = workflows.map(wf => {
+          const status = wf.status === 'complete'    ? '✓ complete'
+                       : wf.status === 'in-progress' ? `step: ${wf.currentStep}`
+                       : 'not started';
+          return `${wf.name}  [${status}]${wf.description ? '\n  ' + wf.description : ''}`;
         });
         ui.addSysMsg('Workflows:\n' + lines.join('\n\n') + '\n\n:workflow <name>                   — run\n:workflow create <name> <goal>     — create new\n:workflow improve <name> <feedback>— revise steps');
       }
@@ -1246,29 +1243,11 @@ async function handleSend() {
     if (args.startsWith('create ')) {
       const rest = args.slice(7).trim();
       const spaceIdx = rest.indexOf(' ');
-      if (spaceIdx === -1) {
-        ui.addSysMsg('Usage: :workflow create <name> <goal description>');
-        return;
-      }
+      if (spaceIdx === -1) { ui.addSysMsg('Usage: :workflow create <name> <goal description>'); return; }
       const wfName = rest.slice(0, spaceIdx);
       const goal = rest.slice(spaceIdx + 1).trim();
-      const createPrompt = [
-        `Create a workflow definition for a task called "${wfName}".`,
-        `Goal: ${goal}`,
-        `Write the workflow as JSON to /workflows/${wfName}.json.`,
-        'The JSON must have: { "name": "' + wfName + '", "description": "...", "steps": [...] }',
-        'Each step: { "id": "step-name", "skill": null, "prompt": "..." }',
-        'Rules for writing step prompts:',
-        '- Each prompt must describe a COMPLETE, CONCRETE deliverable with exact file paths',
-        '- If the goal involves a web page, one step must write a complete self-contained HTML file',
-        '  (embed CSS and JavaScript inside the HTML — do not create separate .css / .js files)',
-        '- Each prompt must include the exact artifact path: write to /artifacts/' + wfName + '/<file>',
-        '- Use 3-5 focused steps',
-        'Do NOT execute the steps — only write the workflow definition file.',
-        `context.emit({ type: 'done', message: 'Workflow "${wfName}" created. Run it with :workflow ${wfName}' })`,
-      ].join('\n');
       ui.addUserMsg(`:workflow create ${wfName} ${goal}`);
-      await runTurn(createPrompt, agentState, deps);
+      await runTurn(buildCreatePrompt(wfName, goal), agentState, deps);
       return;
     }
 
@@ -1276,91 +1255,43 @@ async function handleSend() {
     if (args.startsWith('improve ')) {
       const rest = args.slice(8).trim();
       const spaceIdx = rest.indexOf(' ');
-      if (spaceIdx === -1) {
-        ui.addSysMsg('Usage: :workflow improve <name> <feedback>');
-        return;
-      }
+      if (spaceIdx === -1) { ui.addSysMsg('Usage: :workflow improve <name> <feedback>'); return; }
       const wfName = rest.slice(0, spaceIdx);
       const feedback = rest.slice(spaceIdx + 1).trim();
-      const wfPath = `/workflows/${wfName}.json`;
-      const wfRaw = vfs.read(wfPath);
-      if (!wfRaw) {
+      if (!vfs.read(`/workflows/${wfName}.json`)) {
         ui.addSysMsg(`Workflow "${wfName}" not found.\n\nCreate it first:\n  :workflow create ${wfName} <goal>`);
         return;
       }
-      const improvePrompt = [
-        `Read /workflows/${wfName}.json — this is the current workflow definition.`,
-        ``,
-        `User feedback: ${feedback}`,
-        ``,
-        `Revise the workflow definition to address this feedback:`,
-        `- Update step prompts to be more specific and produce complete, concrete deliverables`,
-        `- If the goal involves a web page, ensure one step writes a complete self-contained HTML file`,
-        `  (embed CSS and JavaScript inside the HTML — do not create separate .css / .js files)`,
-        `- Each step prompt must include the exact output path under /artifacts/${wfName}/<file>`,
-        `- Add new steps if needed, remove unnecessary ones, keep 3-6 steps total`,
-        ``,
-        `Write the revised version back to /workflows/${wfName}.json.`,
-        `Do NOT execute the steps — only revise the workflow definition file.`,
-        `context.emit({ type: 'done', message: 'Workflow "${wfName}" improved. Run it with :workflow ${wfName}' })`,
-      ].join('\n');
       ui.addUserMsg(`:workflow improve ${wfName} "${feedback}"`);
-      await runTurn(improvePrompt, agentState, deps);
+      await runTurn(buildImprovePrompt(wfName, feedback), agentState, deps);
       return;
     }
 
     // ── :workflow <name> — run or resume ──
     const wfName = args;
-    const wfPath = `/workflows/${wfName}.json`;
-    const wfRaw = vfs.read(wfPath);
+    const wfRaw = vfs.read(`/workflows/${wfName}.json`);
     if (!wfRaw) {
       ui.addSysMsg(`Workflow "${wfName}" not found.\n\nCreate it first:\n  :workflow create ${wfName} <goal description>`);
       return;
     }
     let wf;
-    try { wf = JSON.parse(wfRaw); } catch { ui.addSysMsg(`Invalid workflow JSON: ${wfPath}`); return; }
+    try { wf = JSON.parse(wfRaw); } catch { ui.addSysMsg(`Invalid workflow JSON: /workflows/${wfName}.json`); return; }
 
-    const statePath = '/scratch/workflow-state.json';
-    let wfState = (() => { try { return JSON.parse(vfs.read(statePath) || 'null'); } catch { return null; } })();
-    if (!wfState || wfState.workflow !== wfName) {
-      wfState = { workflow: wfName, startedAt: new Date().toISOString(), completedSteps: [], currentStep: null, outputs: {} };
-      vfs.write(statePath, JSON.stringify(wfState, null, 2));
-    }
+    const doneCount = (() => { try { return JSON.parse(vfs.read('/scratch/workflow-state.json') || 'null')?.completedSteps?.length ?? 0; } catch { return 0; } })();
+    ui.addSysMsg(`Workflow: ${wfName} (${doneCount}/${wf.steps.length} steps done). Running steps…`);
 
-    const doneSteps = wfState.completedSteps.length;
-    ui.addSysMsg(`Workflow: ${wfName} (${doneSteps}/${wf.steps.length} steps done). Running steps…`);
-
-    for (const step of wf.steps) {
-      if (wfState.completedSteps.includes(step.id)) continue;
-
-      wfState.currentStep = step.id;
-      vfs.write(statePath, JSON.stringify(wfState, null, 2));
-
-      let turnPrompt = step.prompt;
-      if (step.skill && vfs.read(`/skills/${step.skill}/SKILL.md`)) {
-        turnPrompt = `Use the "${step.skill}" skill for this step.\n\n${step.prompt}`;
-      }
-      turnPrompt += `\n\nAfter completing this step:\n1. Update /scratch/workflow-state.json: add "${step.id}" to completedSteps, set outputs["${step.id}"] to a brief result summary.\n2. Call await context.commit('workflow: ${wfName} — step ${step.id} complete').\n3. context.emit({ type: 'done', message: 'Step ${step.id} complete' })`;
-
-      ui.addUserMsg(`[${step.id}] ${step.prompt.slice(0, 80)}${step.prompt.length > 80 ? '…' : ''}`);
-      await runTurn(turnPrompt, agentState, deps);
-
-      // Refresh state from VFS (agent may have updated it)
-      const updated = (() => { try { return JSON.parse(vfs.read(statePath) || 'null'); } catch { return null; } })();
-      if (updated) wfState = updated;
-      if (!wfState.completedSteps.includes(step.id)) {
-        wfState.completedSteps.push(step.id);
-        vfs.write(statePath, JSON.stringify(wfState, null, 2));
-      }
-    }
-
-    ui.addSysMsg(`✅ Workflow "${wfName}" complete!`);
+    await runWorkflowSteps(wf, wfName, vfs, agentState, deps, {
+      onStepDone:    (id) => ui.addSysMsg(`✓ [${id}] complete`),
+      onComplete:    (name) => ui.addSysMsg(`✅ Workflow "${name}" complete!`),
+      onUserMsg:     (text) => ui.addUserMsg(`[step] ${text.slice(0, 100)}…`),
+    });
     return;
   }
 
   // ── Normal agent turn ─────────────────────────────
   ui.addUserMsg(msg);
   await runTurn(msg, agentState, deps);
+  await saveSession(agentState, vfs);
 }
 
 sendBtn.addEventListener('click', handleSend);

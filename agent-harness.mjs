@@ -18,7 +18,8 @@ import { createVFS, execute, extractCode } from './src/agent-core.js';
 import { runTurn, buildSkillIndex } from './src/agent-loop.js';
 import { runRSI, runSkillRSI } from './src/agent-rsi.js';
 import { createGitHubClient, initFromGitHub, commitToGitHub, parseGitHubRepo } from './src/github.js';
-import { loadSession, clearSession } from './src/session.js';
+import { loadSession, saveSession, clearSession } from './src/session.js';
+import { buildCreatePrompt, buildImprovePrompt, listWorkflows, runWorkflowSteps } from './src/workflow-runner.js';
 
 // ════════════════════════════════════════════════════
 // .env loader (zero deps)
@@ -464,8 +465,9 @@ async function repl() {
 
   const rsiLog = (msg) => output.write(c('cyan', `  rsi  `) + c('gray', msg) + '\n');
 
-  // Graceful exit
-  rl.on('close', () => {
+  // Graceful exit — save session before quitting
+  rl.on('close', async () => {
+    await saveSession(state, vfs);
     output.write(c('gray', '\nbye\n\n'));
     process.exit(0);
   });
@@ -696,23 +698,18 @@ async function repl() {
 
       // ── :workflow (list) ──
       if (!args || args === 'list') {
-        const wfPaths = vfs.list().filter(p => p.startsWith('/workflows/') && p.endsWith('.json'));
-        if (wfPaths.length === 0) {
+        const workflows = listWorkflows(vfs);
+        if (workflows.length === 0) {
           output.write(c('gray', '  No workflows yet.\n'));
           output.write(c('gray', '  Create one: :workflow create <name> <goal>\n'));
         } else {
           output.write('\n' + c('cyan', '  Workflows:') + '\n');
-          for (const p of wfPaths) {
-            try {
-              const wf = JSON.parse(vfs.read(p));
-              const stateRaw = vfs.read('/scratch/workflow-state.json');
-              const wfState = stateRaw ? JSON.parse(stateRaw) : null;
-              const active = wfState?.workflow === wf.name;
-              const done = active && wfState?.completedSteps?.length === wf.steps?.length;
-              const status = active ? (done ? c('green', 'complete') : c('amber', `step ${wfState.currentStep}`)) : c('gray', 'not started');
-              output.write(c('gray', `    ${wf.name}`) + '  ' + status + '\n');
-              if (wf.description) output.write(c('gray', `      ${wf.description}\n`));
-            } catch { output.write(c('gray', `    ${p}\n`)); }
+          for (const wf of workflows) {
+            const statusStr = wf.status === 'complete'     ? c('green', 'complete')
+                            : wf.status === 'in-progress'  ? c('amber', `step ${wf.currentStep}`)
+                            : c('gray', 'not started');
+            output.write(c('gray', `    ${wf.name}`) + '  ' + statusStr + '\n');
+            if (wf.description) output.write(c('gray', `      ${wf.description}\n`));
           }
           output.write(c('gray', '\n  :workflow <name>                   — run\n'));
           output.write(c('gray', '  :workflow create <name> <goal>     — create new\n'));
@@ -732,23 +729,8 @@ async function repl() {
         }
         const wfName = rest.slice(0, spaceIdx);
         const goal = rest.slice(spaceIdx + 1).trim();
-        const createPrompt = [
-          `Create a workflow definition for a task called "${wfName}".`,
-          `Goal: ${goal}`,
-          `Write the workflow as JSON to /workflows/${wfName}.json.`,
-          'The JSON must have: { "name": "' + wfName + '", "description": "...", "steps": [...] }',
-          'Each step: { "id": "step-name", "skill": null, "prompt": "..." }',
-          'Rules for writing step prompts:',
-          '- Each prompt must describe a COMPLETE, CONCRETE deliverable with exact file paths',
-          '- If the goal involves a web page, one step must write a complete self-contained HTML file',
-          '  (embed CSS and JavaScript inside the HTML — do not create separate .css / .js files)',
-          '- Each prompt must include the exact artifact path: write to /artifacts/' + wfName + '/<file>',
-          '- Use 3-5 focused steps',
-          'Do NOT execute the steps — only write the workflow definition file.',
-          `context.emit({ type: 'done', message: 'Workflow "${wfName}" created. Run it with :workflow ${wfName}' })`,
-        ].join('\n');
         ui.user(`:workflow create ${wfName} ${goal}`);
-        await runTurn(createPrompt, state, deps);
+        await runTurn(buildCreatePrompt(wfName, goal), state, deps);
         continue;
       }
 
@@ -762,119 +744,42 @@ async function repl() {
         }
         const wfName = rest.slice(0, spaceIdx);
         const feedback = rest.slice(spaceIdx + 1).trim();
-        const wfPath = `/workflows/${wfName}.json`;
-        const wfRaw = vfs.read(wfPath);
-        if (!wfRaw) {
+        if (!vfs.read(`/workflows/${wfName}.json`)) {
           output.write(c('red', `  Workflow "${wfName}" not found.\n`));
           output.write(c('gray', `  Create it first: :workflow create ${wfName} <goal>\n`));
           continue;
         }
-        const improvePrompt = [
-          `Read /workflows/${wfName}.json — this is the current workflow definition.`,
-          ``,
-          `User feedback: ${feedback}`,
-          ``,
-          `Revise the workflow definition to address this feedback:`,
-          `- Update step prompts to be more specific and produce complete, concrete deliverables`,
-          `- If the goal involves a web page, ensure one step writes a complete self-contained HTML file`,
-          `  (embed CSS and JavaScript inside the HTML — do not create separate .css / .js files)`,
-          `- Each step prompt must include the exact output path under /artifacts/${wfName}/<file>`,
-          `- Add new steps if needed, remove unnecessary ones, keep 3-6 steps total`,
-          ``,
-          `Write the revised version back to /workflows/${wfName}.json.`,
-          `Do NOT execute the steps — only revise the workflow definition file.`,
-          `context.emit({ type: 'done', message: 'Workflow "${wfName}" improved. Run it with :workflow ${wfName}' })`,
-        ].join('\n');
         ui.user(`:workflow improve ${wfName} "${feedback}"`);
-        await runTurn(improvePrompt, state, deps);
+        await runTurn(buildImprovePrompt(wfName, feedback), state, deps);
         continue;
       }
 
       // ── :workflow <name> — run or resume ──
       const wfName = args;
-      const wfPath = `/workflows/${wfName}.json`;
-      const wfRaw = vfs.read(wfPath);
+      const wfRaw = vfs.read(`/workflows/${wfName}.json`);
       if (!wfRaw) {
         output.write(c('red', `  Workflow "${wfName}" not found.\n`));
         output.write(c('gray', `  Create it: :workflow create ${wfName} <goal description>\n`));
         continue;
       }
-
       let wf;
       try { wf = JSON.parse(wfRaw); }
-      catch { output.write(c('red', `  Invalid workflow JSON: ${wfPath}\n`)); continue; }
+      catch { output.write(c('red', `  Invalid workflow JSON: /workflows/${wfName}.json\n`)); continue; }
 
-      // Load or init checkpoint
-      const statePath = '/scratch/workflow-state.json';
-      let wfState = vfs.read(statePath) ? (() => { try { return JSON.parse(vfs.read(statePath)); } catch { return null; } })() : null;
-      if (!wfState || wfState.workflow !== wfName) {
-        wfState = { workflow: wfName, startedAt: new Date().toISOString(), completedSteps: [], currentStep: null, outputs: {} };
-        vfs.write(statePath, JSON.stringify(wfState, null, 2));
-      }
+      const doneCount = (() => {
+        try { return JSON.parse(vfs.read('/scratch/workflow-state.json') || 'null')?.completedSteps?.length ?? 0; } catch { return 0; }
+      })();
+      output.write('\n' + c('cyan', `  Workflow: ${wfName}`) + c('gray', ` (${doneCount}/${wf.steps.length} steps done)`) + '\n');
 
-      const totalSteps = wf.steps.length;
-      const doneSteps = wfState.completedSteps.length;
-      output.write('\n' + c('cyan', `  Workflow: ${wfName}`) + c('gray', ` (${doneSteps}/${totalSteps} steps done)`) + '\n');
-
-      // Drive steps sequentially
-      for (const step of wf.steps) {
-        if (wfState.completedSteps.includes(step.id)) {
-          output.write(c('gray', `  ✓ [${step.id}] already done\n`));
-          continue;
-        }
-
-        output.write('\n' + c('amber', `  ▶ [${step.id}]`) + c('gray', ` ${step.prompt.slice(0, 80)}`) + '\n');
-
-        // Update checkpoint
-        wfState.currentStep = step.id;
-        vfs.write(statePath, JSON.stringify(wfState, null, 2));
-
-        // Build the turn prompt — include skill instructions if referenced
-        let turnPrompt = step.prompt;
-        if (step.skill) {
-          const skillMd = vfs.read(`/skills/${step.skill}/SKILL.md`);
-          if (skillMd) {
-            turnPrompt = `Use the "${step.skill}" skill for this step.\n\n${step.prompt}`;
-          }
-        }
-
-        // Append checkpoint update instructions to the step prompt
-        turnPrompt += `\n\nAfter completing this step:
-1. Update /scratch/workflow-state.json: add "${step.id}" to completedSteps, set outputs["${step.id}"] to a brief result summary.
-2. Call await context.commit('workflow: ${wfName} — step ${step.id} complete').
-3. context.emit({ type: 'done', message: 'Step ${step.id} complete' })`;
-
-        ui.user(turnPrompt);
-        await runTurn(turnPrompt, state, deps);
-
-        // Continuation pass: verify step completion and fill any gaps
-        output.write(c('gray', `  ↺ [${step.id}] verifying...\n`));
-        await runTurn(
-          `You just ran step "${step.id}". Its task was:\n${step.prompt}\n\n` +
-          `Call context.vfs.list() and verify every file or output the step required now exists. ` +
-          `If anything is missing or incomplete, write it now. ` +
-          `context.emit({ type: 'done', message: 'Step ${step.id} verified' })`,
-          state, deps
-        );
-
-        // Read updated state after the step ran
-        const updatedRaw = vfs.read(statePath);
-        if (updatedRaw) {
-          try { wfState = JSON.parse(updatedRaw); } catch {}
-        }
-
-        // If agent didn't update completedSteps, do it here as a safety net
-        if (!wfState.completedSteps.includes(step.id)) {
-          wfState.completedSteps.push(step.id);
-          vfs.write(statePath, JSON.stringify(wfState, null, 2));
-          output.write(c('gray', `  (checkpoint updated for step ${step.id})\n`));
-        }
-
-        output.write(c('green', `  ✓ [${step.id}] complete\n`));
-      }
-
-      output.write('\n' + c('green', `  ✅ Workflow "${wfName}" complete!`) + '\n\n');
-      ui.hr();
+      await runWorkflowSteps(wf, wfName, vfs, state, deps, {
+        onStepStart:          (id, preview) => output.write('\n' + c('amber', `  ▶ [${id}]`) + c('gray', ` ${preview}`) + '\n'),
+        onStepVerifying:      (id) => output.write(c('gray', `  ↺ [${id}] verifying...\n`)),
+        onStepDone:           (id) => output.write(c('green', `  ✓ [${id}] complete\n`)),
+        onStepSkipped:        (id) => output.write(c('gray', `  ✓ [${id}] already done\n`)),
+        onCheckpointUpdated:  (id) => output.write(c('gray', `  (checkpoint updated for step ${id})\n`)),
+        onComplete:           (name) => { output.write('\n' + c('green', `  ✅ Workflow "${name}" complete!`) + '\n\n'); ui.hr(); },
+        onUserMsg:            (text) => ui.user(text),
+      });
       continue;
     }
 
@@ -885,6 +790,7 @@ async function repl() {
 
     ui.user(msg);
     await runTurn(msg, state, deps);
+    await saveSession(state, vfs);
   }
 }
 
@@ -1122,121 +1028,47 @@ async function workflowList() {
 async function workflowCreate(wfName, goal) {
   requireKey();
   const { state, deps } = createRunContext();
-  const createPrompt = [
-    `Create a workflow definition for a task called "${wfName}".`,
-    `Goal: ${goal}`,
-    `Write the workflow as JSON to /workflows/${wfName}.json.`,
-    'The JSON must have: { "name": "' + wfName + '", "description": "...", "steps": [...] }',
-    'Each step: { "id": "step-name", "skill": null, "prompt": "..." }',
-    'Rules for writing step prompts:',
-    '- Each prompt must describe a COMPLETE, CONCRETE deliverable with exact file paths',
-    '- If the goal involves a web page, one step must write a complete self-contained HTML file',
-    '  (embed CSS and JavaScript inside the HTML — do not create separate .css / .js files)',
-    '- Each prompt must include the exact artifact path: write to /artifacts/' + wfName + '/<file>',
-    '- Use 3-5 focused steps',
-    'Do NOT execute the steps — only write the workflow definition file.',
-    `context.emit({ type: 'done', message: 'Workflow "${wfName}" created. Run it with: aaron workflow run ${wfName}' })`,
-  ].join('\n');
   output.write('\n' + c('cyan', `  Creating workflow: ${wfName}`) + '\n\n');
-  await runTurn(createPrompt, state, deps);
+  await runTurn(buildCreatePrompt(wfName, goal), state, deps);
 }
 
 async function workflowImprove(wfName, feedback) {
   requireKey();
   const { vfs, state, deps } = createRunContext();
-  const wfPath = `/workflows/${wfName}.json`;
-  const wfRaw = vfs.read(wfPath);
-  if (!wfRaw) {
+  if (!vfs.read(`/workflows/${wfName}.json`)) {
     output.write(c('red', `  Workflow "${wfName}" not found.\n`));
     output.write(c('gray', `  Create it first: aaron workflow create ${wfName} "goal"\n`));
     process.exit(1);
   }
-  const improvePrompt = [
-    `Read /workflows/${wfName}.json — this is the current workflow definition.`,
-    ``,
-    `User feedback: ${feedback}`,
-    ``,
-    `Revise the workflow definition to address this feedback:`,
-    `- Update step prompts to be more specific and produce complete, concrete deliverables`,
-    `- If the goal involves a web page, ensure one step writes a complete self-contained HTML file`,
-    `  (embed CSS and JavaScript inside the HTML — do not create separate .css / .js files)`,
-    `- Each step prompt must include the exact output path under /artifacts/${wfName}/<file>`,
-    `- Add new steps if needed, remove unnecessary ones, keep 3-6 steps total`,
-    ``,
-    `Write the revised version back to /workflows/${wfName}.json.`,
-    `Do NOT execute the steps — only revise the workflow definition file.`,
-    `context.emit({ type: 'done', message: 'Workflow "${wfName}" improved. Run it with: aaron workflow run ${wfName}' })`,
-  ].join('\n');
   output.write('\n' + c('cyan', `  Improving workflow: ${wfName}`) + '\n\n');
-  await runTurn(improvePrompt, state, deps);
+  await runTurn(buildImprovePrompt(wfName, feedback), state, deps);
 }
 
 async function workflowRun(wfName) {
   requireKey();
   const { vfs, state, deps } = createRunContext();
-  const wfPath = `/workflows/${wfName}.json`;
-  const wfRaw = vfs.read(wfPath);
+  const wfRaw = vfs.read(`/workflows/${wfName}.json`);
   if (!wfRaw) {
     output.write(c('red', `  Workflow "${wfName}" not found.\n`));
     output.write(c('gray', `  Create it: aaron workflow create ${wfName} "goal"\n`));
     process.exit(1);
   }
   let wf;
-  try { wf = JSON.parse(wfRaw); } catch { output.write(c('red', `  Invalid workflow JSON: ${wfPath}\n`)); process.exit(1); }
+  try { wf = JSON.parse(wfRaw); } catch { output.write(c('red', `  Invalid workflow JSON\n`)); process.exit(1); }
 
-  const statePath = '/scratch/workflow-state.json';
-  let wfState = (() => { try { return JSON.parse(vfs.read(statePath) || 'null'); } catch { return null; } })();
-  if (!wfState || wfState.workflow !== wfName) {
-    wfState = { workflow: wfName, startedAt: new Date().toISOString(), completedSteps: [], currentStep: null, outputs: {} };
-    vfs.write(statePath, JSON.stringify(wfState, null, 2));
-  }
+  const doneCount = (() => {
+    try { return JSON.parse(vfs.read('/scratch/workflow-state.json') || 'null')?.completedSteps?.length ?? 0; } catch { return 0; }
+  })();
+  output.write('\n' + c('cyan', `  Workflow: ${wfName}`) + c('gray', ` (${doneCount}/${wf.steps.length} steps done)`) + '\n');
 
-  const totalSteps = wf.steps.length;
-  const doneSteps = wfState.completedSteps.length;
-  output.write('\n' + c('cyan', `  Workflow: ${wfName}`) + c('gray', ` (${doneSteps}/${totalSteps} steps done)`) + '\n');
-
-  for (const step of wf.steps) {
-    if (wfState.completedSteps.includes(step.id)) {
-      output.write(c('gray', `  ✓ [${step.id}] already done\n`));
-      continue;
-    }
-
-    output.write('\n' + c('amber', `  ▶ [${step.id}]`) + c('gray', ` ${step.prompt.slice(0, 80)}`) + '\n');
-
-    wfState.currentStep = step.id;
-    vfs.write(statePath, JSON.stringify(wfState, null, 2));
-
-    let turnPrompt = step.prompt;
-    if (step.skill && vfs.read(`/skills/${step.skill}/SKILL.md`)) {
-      turnPrompt = `Use the "${step.skill}" skill for this step.\n\n${step.prompt}`;
-    }
-    turnPrompt += `\n\nAfter completing this step:
-1. Update /scratch/workflow-state.json: add "${step.id}" to completedSteps, set outputs["${step.id}"] to a brief result summary.
-2. Call await context.commit('workflow: ${wfName} — step ${step.id} complete').
-3. context.emit({ type: 'done', message: 'Step ${step.id} complete' })`;
-
-    await runTurn(turnPrompt, state, deps);
-
-    // Continuation pass: verify step completion and fill any gaps
-    output.write(c('gray', `  ↺ [${step.id}] verifying...\n`));
-    await runTurn(
-      `You just ran step "${step.id}". Its task was:\n${step.prompt}\n\n` +
-      `Call context.vfs.list() and verify every file or output the step required now exists. ` +
-      `If anything is missing or incomplete, write it now. ` +
-      `context.emit({ type: 'done', message: 'Step ${step.id} verified' })`,
-      state, deps
-    );
-
-    const updatedRaw = vfs.read(statePath);
-    if (updatedRaw) { try { wfState = JSON.parse(updatedRaw); } catch {} }
-    if (!wfState.completedSteps.includes(step.id)) {
-      wfState.completedSteps.push(step.id);
-      vfs.write(statePath, JSON.stringify(wfState, null, 2));
-    }
-    output.write(c('green', `  ✓ [${step.id}] complete\n`));
-  }
-
-  output.write('\n' + c('green', `  ✅ Workflow "${wfName}" complete!`) + '\n\n');
+  await runWorkflowSteps(wf, wfName, vfs, state, deps, {
+    onStepStart:         (id, preview) => output.write('\n' + c('amber', `  ▶ [${id}]`) + c('gray', ` ${preview}`) + '\n'),
+    onStepVerifying:     (id) => output.write(c('gray', `  ↺ [${id}] verifying...\n`)),
+    onStepDone:          (id) => output.write(c('green', `  ✓ [${id}] complete\n`)),
+    onStepSkipped:       (id) => output.write(c('gray', `  ✓ [${id}] already done\n`)),
+    onCheckpointUpdated: (id) => output.write(c('gray', `  (checkpoint updated for step ${id})\n`)),
+    onComplete:          (name) => output.write('\n' + c('green', `  ✅ Workflow "${name}" complete!`) + '\n\n'),
+  });
 }
 
 // ════════════════════════════════════════════════════
