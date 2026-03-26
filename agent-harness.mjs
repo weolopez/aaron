@@ -173,22 +173,26 @@ const ui = {
   banner() {
     const provider = env.LLM_PROVIDER ?? 'anthropic';
     output.write('\n');
-    output.write(c('amber', '  agent/harness') + c('gray', '  cli\n'));
+    output.write(c('amber', '  aaron') + c('gray', '  isomorphic coding agent\n'));
     output.write(c('gray',  '  provider: ') + c('dim', provider) + '\n');
-    output.write(c('gray',  '  node:  ') + c('dim', process.version) + '\n');
+    output.write(c('gray',  '  node:     ') + c('dim', process.version) + '\n');
+    output.write(c('gray',  '  tip:      ') + c('dim', 'aaron --help  for full usage\n'));
     output.write('\n');
-    output.write(c('gray', '  Commands:\n'));
-    output.write(c('gray', '  :vfs            — list VFS contents\n'));
-    output.write(c('gray', '  :cat /path      — show a file\n'));
-    output.write(c('gray', '  :workflow                           — list workflows\n'));
-    output.write(c('gray', '  :workflow create <name> <goal>      — create workflow definition\n'));
-    output.write(c('gray', '  :workflow improve <name> <feedback> — revise step prompts\n'));
-    output.write(c('gray', '  :workflow rsi <name> [budget]       — iterate workflow definition\n'));
-    output.write(c('gray', '  :workflow <name>                    — run or resume a workflow\n'));
-    output.write(c('gray', '  :rsi            — run RSI experiment loop\n'));
-    output.write(c('gray', '  :skill          — run skill RSI experiment loop\n'));
-    output.write(c('gray', '  :clear          — reset conversation history\n'));
-    output.write(c('gray', '  :exit           — quit\n'));
+    output.write(c('gray', '  REPL commands:\n'));
+    output.write(c('dim',  '  :vfs                               list VFS files\n'));
+    output.write(c('dim',  '  :cat /path                         print a VFS file\n'));
+    output.write(c('dim',  '  :workflow                          list workflows\n'));
+    output.write(c('dim',  '  :workflow create <name> <goal>     create workflow\n'));
+    output.write(c('dim',  '  :workflow improve <name> <fb>      revise step prompts\n'));
+    output.write(c('dim',  '  :workflow rsi <name> [budget]      iterate workflow definition\n'));
+    output.write(c('dim',  '  :workflow <name>                   run or resume workflow\n'));
+    output.write(c('dim',  '  :rsi [budget]                      harness RSI loop\n'));
+    output.write(c('dim',  '  :skill [budget]                    skill RSI loop\n'));
+    output.write(c('dim',  '  :github                            show GitHub status\n'));
+    output.write(c('dim',  '  :push [message]                    push /src/ to GitHub\n'));
+    output.write(c('dim',  '  :clear                             reset conversation history\n'));
+    output.write(c('dim',  '  :reset                             clear saved session\n'));
+    output.write(c('dim',  '  :exit                              quit\n'));
     output.write('\n');
     this.hr();
   },
@@ -809,8 +813,14 @@ async function repl() {
       continue;
     }
 
+    if (msg === ':help' || msg === ':h') {
+      ui.banner();
+      continue;
+    }
+
     if (msg.startsWith(':')) {
       output.write(c('gray', `  unknown command: ${msg}\n`));
+      output.write(c('dim',  `  type :exit to quit, or see aaron --help for full reference\n`));
       continue;
     }
 
@@ -888,15 +898,24 @@ async function run(prompt) {
 
 function skillUsage() {
   output.write('\n' + c('amber', '  aaron skill') + c('gray', ' — manage agent skills\n\n'));
-  output.write(c('gray', '  Usage:\n'));
-  output.write(c('gray', '    aaron skill list                          list available skills\n'));
-  output.write(c('gray', '    aaron skill show <name>                   print a skill\'s SKILL.md\n'));
-  output.write(c('gray', '    aaron skill create <name> "eval task"     create a new skill via RSI\n'));
-  output.write(c('gray', '    aaron skill improve <name> "eval task"    improve an existing skill via RSI\n'));
-  output.write(c('gray', '    aaron skill rsi <name> "eval task"        alias for improve (or create if new)\n'));
+  output.write(c('cyan', '  Usage:\n'));
+  output.write(c('dim',  '    aaron skill list                          ') + c('gray', 'list installed skills\n'));
+  output.write(c('dim',  '    aaron skill show <name>                   ') + c('gray', 'print SKILL.md to stdout\n'));
+  output.write(c('dim',  '    aaron skill create <name> "eval task"     ') + c('gray', 'create new skill via RSI\n'));
+  output.write(c('dim',  '    aaron skill improve <name> "eval task"    ') + c('gray', 'improve existing skill via RSI\n'));
+  output.write(c('dim',  '    aaron skill rsi <name> "eval task"        ') + c('gray', 'create-or-improve (auto-detects)\n'));
   output.write('\n');
-  output.write(c('gray', '  Options:\n'));
-  output.write(c('gray', '    --budget N   RSI experiment budget (default: 3)\n'));
+  output.write(c('cyan', '  Options:\n'));
+  output.write(c('dim',  '    --budget N   ') + c('gray', 'RSI experiment budget (default: 3)\n'));
+  output.write('\n');
+  output.write(c('cyan', '  Examples:\n'));
+  output.write(c('dim',  '    aaron skill list\n'));
+  output.write(c('dim',  '    aaron skill create summarizer "summarize long documents"\n'));
+  output.write(c('dim',  '    aaron skill improve summarizer "make summaries shorter" --budget 5\n'));
+  output.write(c('dim',  '    aaron skill show summarizer\n'));
+  output.write('\n');
+  output.write(c('gray', '  Skills live in skills/<name>/SKILL.md (agentskills.io format).\n'));
+  output.write(c('gray', '  Run ') + c('dim', 'aaron --help') + c('gray', ' for full documentation.\n'));
   output.write('\n');
 }
 
@@ -1013,13 +1032,22 @@ async function skillRSI(name, evalTask, budget, mode) {
 // ════════════════════════════════════════════════════
 
 function workflowUsage() {
-  output.write('\n' + c('amber', '  aaron workflow') + c('gray', ' — manage workflows\n\n'));
-  output.write(c('gray', '  Usage:\n'));
-  output.write(c('gray', '    aaron workflow list                            list defined workflows\n'));
-  output.write(c('gray', '    aaron workflow create <name> "goal"            define a new workflow\n'));
-  output.write(c('gray', '    aaron workflow improve <name> "feedback"       revise step prompts\n'));
-  output.write(c('gray', '    aaron workflow run <name>                      run or resume a workflow\n'));
-  output.write(c('gray', '    aaron :workflow <sub> ...                      colon prefix also works\n'));
+  output.write('\n' + c('amber', '  aaron workflow') + c('gray', ' — manage multi-step agent workflows\n\n'));
+  output.write(c('cyan', '  Usage:\n'));
+  output.write(c('dim',  '    aaron workflow list                        ') + c('gray', 'list workflows with status\n'));
+  output.write(c('dim',  '    aaron workflow create <name> "goal"        ') + c('gray', 'define a new workflow via agent\n'));
+  output.write(c('dim',  '    aaron workflow improve <name> "feedback"   ') + c('gray', 'revise step prompts via agent\n'));
+  output.write(c('dim',  '    aaron workflow run <name>                  ') + c('gray', 'run or resume a workflow\n'));
+  output.write('\n');
+  output.write(c('cyan', '  Examples:\n'));
+  output.write(c('dim',  '    aaron workflow list\n'));
+  output.write(c('dim',  '    aaron workflow create report "generate a weekly status report"\n'));
+  output.write(c('dim',  '    aaron workflow run report\n'));
+  output.write(c('dim',  '    aaron workflow improve report "add an executive summary step"\n'));
+  output.write('\n');
+  output.write(c('gray', '  Workflows are JSON files in workflows/<name>.json.\n'));
+  output.write(c('gray', '  Run/resume state is checkpointed per step (survives restarts).\n'));
+  output.write(c('gray', '  Run ') + c('dim', 'aaron --help') + c('gray', ' for full documentation.\n'));
   output.write('\n');
 }
 
@@ -1098,6 +1126,115 @@ async function workflowRun(wfName) {
 }
 
 // ════════════════════════════════════════════════════
+// USAGE / HELP
+// ════════════════════════════════════════════════════
+
+function usage() {
+  const b = (s) => c('amber', s);
+  const g = (s) => c('gray',  s);
+  const d = (s) => c('dim',   s);
+  const h = (s) => c('cyan',  s);
+
+  output.write('\n');
+  output.write(b('  aaron') + g(' — isomorphic JS coding agent\n'));
+  output.write('\n');
+
+  output.write(h('  USAGE\n'));
+  output.write(d('    aaron                                        ') + g('interactive REPL\n'));
+  output.write(d('    aaron "prompt"                               ') + g('single-shot (no REPL)\n'));
+  output.write(d('    aaron skill <sub> [args]                     ') + g('skill management\n'));
+  output.write(d('    aaron workflow <sub> [args]                  ') + g('workflow management\n'));
+  output.write(d('    aaron --help                                 ') + g('this message\n'));
+  output.write(d('    aaron --version                              ') + g('print version info\n'));
+  output.write('\n');
+
+  output.write(h('  ENVIRONMENT\n'));
+  output.write(d('    ANTHROPIC_API_KEY=sk-ant-...   ') + g('required for Anthropic provider\n'));
+  output.write(d('    LLM_PROVIDER=anthropic         ') + g('LLM provider (default: anthropic)\n'));
+  output.write(d('    GITHUB_TOKEN=ghp_...           ') + g('GitHub PAT for push/hydration\n'));
+  output.write(d('    GITHUB_REPO=owner/repo[@ref]   ') + g('repo to sync VFS /src/ with\n'));
+  output.write('\n');
+  output.write(g('    Alternatively, place these in a ') + d('.env') + g(' file in the project root.\n'));
+  output.write('\n');
+
+  output.write(h('  REPL COMMANDS\n'));
+  output.write(g('    The interactive REPL accepts plain messages and the following commands:\n\n'));
+  output.write(d('    :vfs                              ') + g('list all VFS files (path, size, dirty)\n'));
+  output.write(d('    :cat /path                        ') + g('print a VFS file to stdout\n'));
+  output.write(d('    :clear                            ') + g('reset conversation history (VFS persists)\n'));
+  output.write(d('    :reset                            ') + g('clear saved session from disk\n'));
+  output.write(d('    :exit | :quit                     ') + g('quit (auto-saves session)\n'));
+  output.write('\n');
+  output.write(d('    :github                           ') + g('show GitHub connection status\n'));
+  output.write(d('    :push [commit message]            ') + g('push dirty /src/ files to GitHub\n'));
+  output.write('\n');
+  output.write(d('    :rsi [budget]                     ') + g('run harness RSI experiment loop\n'));
+  output.write(d('    :skill [budget]                   ') + g('run skill RSI experiment loop\n'));
+  output.write('\n');
+  output.write(d('    :workflow                         ') + g('list defined workflows\n'));
+  output.write(d('    :workflow <name>                  ') + g('run or resume a workflow\n'));
+  output.write(d('    :workflow create <name> <goal>    ') + g('create a workflow via agent\n'));
+  output.write(d('    :workflow improve <name> <fb>     ') + g('revise workflow step prompts\n'));
+  output.write(d('    :workflow rsi <name> [budget]     ') + g('iterate workflow definition via RSI\n'));
+  output.write('\n');
+
+  output.write(h('  SKILL SUBCOMMANDS\n'));
+  output.write(d('    aaron skill list                             ') + g('list installed skills\n'));
+  output.write(d('    aaron skill show <name>                      ') + g('print SKILL.md to stdout\n'));
+  output.write(d('    aaron skill create <name> "eval task"        ') + g('create new skill via RSI\n'));
+  output.write(d('    aaron skill improve <name> "eval task"       ') + g('improve existing skill via RSI\n'));
+  output.write(d('    aaron skill rsi <name> "eval task"           ') + g('create-or-improve (auto-detects)\n'));
+  output.write(d('    --budget N                                   ') + g('RSI experiment budget (default: 3)\n'));
+  output.write('\n');
+
+  output.write(h('  WORKFLOW SUBCOMMANDS\n'));
+  output.write(d('    aaron workflow list                          ') + g('list defined workflows\n'));
+  output.write(d('    aaron workflow create <name> "goal"          ') + g('define a workflow via agent\n'));
+  output.write(d('    aaron workflow improve <name> "feedback"     ') + g('revise step prompts via agent\n'));
+  output.write(d('    aaron workflow run <name>                    ') + g('run or resume a workflow\n'));
+  output.write('\n');
+
+  output.write(h('  VFS DIRECTORIES\n'));
+  output.write(d('    /src/          ') + g('working codebase (synced to GitHub if configured)\n'));
+  output.write(d('    /harness/      ') + g('agent runtime (RSI target: agent-loop.js)\n'));
+  output.write(d('    /memory/       ') + g('long-term facts (persisted to memory/ on disk)\n'));
+  output.write(d('    /artifacts/    ') + g('agent outputs (persisted to artifacts/ on disk)\n'));
+  output.write(d('    /skills/*/     ') + g('skill definitions (SKILL.md, agentskills.io format)\n'));
+  output.write(d('    /workflows/*/  ') + g('workflow definitions (JSON, driven by :workflow)\n'));
+  output.write(d('    /scratch/      ') + g('ephemeral planning scratchpad\n'));
+  output.write('\n');
+
+  output.write(h('  EXAMPLES\n'));
+  output.write(d('    ANTHROPIC_API_KEY=sk-ant-... aaron\n'));
+  output.write(d('    ANTHROPIC_API_KEY=sk-ant-... aaron "write a fibonacci function"\n'));
+  output.write(d('    ANTHROPIC_API_KEY=sk-ant-... aaron skill create summarizer "summarize long docs"\n'));
+  output.write(d('    ANTHROPIC_API_KEY=sk-ant-... aaron workflow create report "weekly status report"\n'));
+  output.write(d('    ANTHROPIC_API_KEY=sk-ant-... aaron workflow run report\n'));
+  output.write('\n');
+  output.write(g('    With a .env file, omit the key prefix:\n'));
+  output.write(d('    aaron "explain the VFS architecture"\n'));
+  output.write('\n');
+
+  output.write(h('  SESSION\n'));
+  output.write(g('    The REPL auto-saves conversation state (history + VFS) on exit.\n'));
+  output.write(g('    On next launch it will offer to resume. Use :reset to wipe saved state.\n'));
+  output.write('\n');
+
+  output.write(h('  DOCS\n'));
+  output.write(g('    CLAUDE.md  — architecture, RSI contract, code style\n'));
+  output.write(g('    ADR.md     — 13 architectural decisions with full rationale\n'));
+  output.write('\n');
+}
+
+function version() {
+  const provider = env.LLM_PROVIDER ?? 'anthropic';
+  output.write(c('amber', 'aaron') + c('gray', '  isomorphic JS coding agent\n'));
+  output.write(c('gray', `node     ${process.version}\n`));
+  output.write(c('gray', `provider ${provider}\n`));
+  output.write(c('gray', `platform ${process.platform} ${process.arch}\n`));
+}
+
+// ════════════════════════════════════════════════════
 // ENTRYPOINT
 // ════════════════════════════════════════════════════
 
@@ -1106,6 +1243,16 @@ const argv = process.argv.slice(2);
 function fatal(msg) {
   output.write(c('red', `\nFatal: ${msg}\n`));
   process.exit(1);
+}
+
+// Top-level flags
+if (argv[0] === '-h' || argv[0] === '--help' || argv[0] === 'help') {
+  usage();
+  process.exit(0);
+}
+if (argv[0] === '--version' || argv[0] === '-V') {
+  version();
+  process.exit(0);
 }
 
 // Normalize argv[0]: `:workflow` → treat as `workflow`
