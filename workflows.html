@@ -1,0 +1,1432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>aaron / workflows</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;1,400&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:       #09090b;
+  --bg2:      #0f0f12;
+  --bg3:      #16161a;
+  --bg4:      #1e1e24;
+  --border:   #252530;
+  --border2:  #2e2e3a;
+  --text:     #c4c0b8;
+  --dim:      #4e4e5a;
+  --dim2:     #6a6a78;
+  --amber:    #e8a030;
+  --amber-lo: rgba(232,160,48,0.08);
+  --amber-brd:rgba(232,160,48,0.3);
+  --cyan:     #32d4b0;
+  --cyan-lo:  rgba(50,212,176,0.06);
+  --cyan-brd: rgba(50,212,176,0.25);
+  --red:      #d95050;
+  --red-lo:   rgba(217,80,80,0.08);
+  --red-brd:  rgba(217,80,80,0.3);
+  --green:    #5ab870;
+  --blue:     #5888d8;
+  --mono:     'JetBrains Mono', monospace;
+  --display:  'Syne', sans-serif;
+}
+
+html.light {
+  --bg:       #f5f4f0;
+  --bg2:      #edece7;
+  --bg3:      #e4e3de;
+  --bg4:      #d8d7d1;
+  --border:   #cccbc3;
+  --border2:  #b5b4ac;
+  --text:     #28271f;
+  --dim:      #7a7870;
+  --dim2:     #5e5d55;
+  --amber:    #b86c10;
+  --amber-lo: rgba(184,108,16,0.09);
+  --amber-brd:rgba(184,108,16,0.28);
+  --cyan:     #1a8f74;
+  --cyan-lo:  rgba(26,143,116,0.07);
+  --cyan-brd: rgba(26,143,116,0.25);
+  --red:      #b83030;
+  --red-lo:   rgba(184,48,48,0.07);
+  --red-brd:  rgba(184,48,48,0.28);
+  --green:    #2e7a3e;
+  --blue:     #2d5aaa;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  display: grid;
+  grid-template-rows: 42px auto 1fr;
+  height: 100vh;
+}
+
+/* ── HEADER ─────────────────────────────────────── */
+header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 18px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  z-index: 10;
+}
+
+.logo {
+  font-family: var(--display);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  color: var(--amber);
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.logo em { color: var(--dim2); font-style: normal; font-weight: 700; }
+.logo a  { color: inherit; text-decoration: none; }
+.logo a:hover { text-decoration: underline; text-decoration-color: var(--border2); }
+
+.header-sep { flex: 1; height: 1px; background: var(--border); }
+
+.header-btn {
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  border-radius: 3px;
+  color: var(--dim2);
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: color 0.1s, border-color 0.1s;
+  flex-shrink: 0;
+  letter-spacing: 0.06em;
+}
+.header-btn:hover { color: var(--text); border-color: var(--amber-brd); }
+.header-btn.primary {
+  background: var(--amber);
+  border-color: var(--amber);
+  color: #000;
+  font-weight: 700;
+  font-family: var(--display);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+}
+.header-btn.primary:hover { background: #f0b042; border-color: #f0b042; }
+.header-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+@keyframes rise {
+  from { opacity:0; transform:translateY(4px); }
+  to   { opacity:1; transform:none; }
+}
+
+/* ── CONFIG BAR ─────────────────────────────────── */
+.config-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 14px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+.config-bar label { color: var(--dim); flex-shrink: 0; }
+.config-bar input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 3px 8px;
+  width: 220px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.config-bar input:focus { border-color: var(--amber-brd); }
+.config-bar input::placeholder { color: var(--dim); }
+.config-bar .sep { color: var(--border2); margin: 0 4px; }
+.config-bar .status-text {
+  margin-left: auto;
+  color: var(--dim);
+  font-size: 10.5px;
+}
+.config-bar .status-text.ok { color: var(--green); }
+.config-bar .status-text.running { color: var(--amber); animation: pulse 1s infinite; }
+.config-bar .status-text.error { color: var(--red); }
+
+/* ── MAIN ───────────────────────────────────────── */
+main {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  overflow: hidden;
+}
+
+/* ── LEFT PANEL ─────────────────────────────────── */
+.panel-left {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+}
+
+.list-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+  flex-shrink: 0;
+}
+
+.search-input {
+  flex: 1;
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  border-radius: 3px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  padding: 5px 9px;
+  outline: none;
+  transition: border-color 0.15s;
+  min-width: 0;
+}
+.search-input:focus { border-color: var(--amber-brd); }
+.search-input::placeholder { color: var(--dim); }
+
+.item-count {
+  font-size: 10px;
+  color: var(--dim);
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg4);
+}
+
+.wf-list {
+  overflow-y: auto;
+  flex: 1;
+  padding: 6px;
+}
+.wf-list::-webkit-scrollbar { width: 3px; }
+.wf-list::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+.wf-list-empty {
+  padding: 20px 12px;
+  color: var(--dim);
+  font-size: 11.5px;
+  line-height: 1.7;
+}
+
+/* ── WORKFLOW CARD ──────────────────────────────── */
+.wf-card {
+  padding: 10px 12px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+  margin-bottom: 3px;
+}
+.wf-card:hover { background: var(--bg3); border-color: var(--border); }
+.wf-card.active { background: var(--amber-lo); border-color: var(--amber-brd); }
+
+.wf-card-name {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.wf-card.active .wf-card-name { color: var(--amber); }
+
+.wf-card-desc {
+  font-size: 11px;
+  color: var(--dim2);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+
+.wf-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.status-badge {
+  font-size: 9.5px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-weight: 600;
+  border: 1px solid;
+}
+.status-badge.not-started { color: var(--dim2); border-color: var(--border2); background: var(--bg4); }
+.status-badge.in-progress { color: var(--amber); border-color: var(--amber-brd); background: var(--amber-lo); }
+.status-badge.complete    { color: var(--cyan);  border-color: var(--cyan-brd);  background: var(--cyan-lo); }
+
+.step-count {
+  font-size: 9.5px;
+  color: var(--dim);
+  margin-left: auto;
+}
+
+/* ── RIGHT PANEL ────────────────────────────────── */
+.panel-right {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  overflow: hidden;
+}
+
+.detail-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.detail-title {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--amber);
+  flex: 1;
+  min-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.detail-title.empty { color: var(--dim); font-style: italic; font-weight: 400; }
+
+.tool-btn {
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  border-radius: 3px;
+  color: var(--dim2);
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: color 0.1s, border-color 0.1s, background 0.1s;
+  flex-shrink: 0;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+.tool-btn:hover { color: var(--text); border-color: var(--amber-brd); }
+.tool-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.tool-btn.run:not(:disabled):hover { color: var(--cyan); border-color: var(--cyan-brd); background: var(--cyan-lo); }
+.tool-btn.rsi:not(:disabled):hover { color: var(--blue); border-color: rgba(88,136,216,0.4); }
+.tool-btn.danger:not(:disabled):hover { color: var(--red); border-color: var(--red-brd); background: var(--red-lo); }
+
+/* ── DETAIL BODY ────────────────────────────────── */
+.detail-body {
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+.detail-body::-webkit-scrollbar { width: 4px; }
+.detail-body::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+.detail-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--dim);
+  font-size: 12px;
+  line-height: 1.7;
+  text-align: center;
+  padding: 32px;
+}
+.detail-empty .big { font-size: 28px; margin-bottom: 4px; }
+
+/* ── WORKFLOW DETAIL VIEW ───────────────────────── */
+.wf-view { display: flex; flex-direction: column; }
+
+.wf-meta-bar {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+  flex-shrink: 0;
+}
+
+.meta-field { display: flex; flex-direction: column; gap: 2px; min-width: 80px; }
+.meta-key {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.meta-val { font-size: 12px; color: var(--text); }
+.meta-val.amber { color: var(--amber); }
+
+/* ── STEPS LIST ─────────────────────────────────── */
+.steps-list {
+  flex: 1;
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+}
+.steps-list::-webkit-scrollbar { width: 4px; }
+.steps-list::-webkit-scrollbar-thumb { background: var(--border2); }
+
+.step-card {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg2);
+  overflow: hidden;
+  transition: border-color 0.15s;
+  animation: rise 0.15s ease;
+}
+.step-card.active { border-color: var(--amber-brd); }
+.step-card.done   { border-color: var(--cyan-brd); }
+
+.step-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg3);
+}
+
+.step-status-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  flex-shrink: 0;
+  transition: all 0.2s;
+  color: var(--dim);
+}
+.step-status-icon.done   { background: var(--cyan-lo); border-color: var(--cyan-brd); color: var(--cyan); }
+.step-status-icon.active { background: var(--amber-lo); border-color: var(--amber-brd); color: var(--amber); animation: pulse 1s infinite; }
+
+.step-id {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.04em;
+}
+.step-card.done .step-id { color: var(--cyan); }
+.step-card.active .step-id { color: var(--amber); }
+
+.step-skill-tag {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 2px;
+  background: var(--bg4);
+  border: 1px solid var(--border2);
+  color: var(--dim2);
+  margin-left: auto;
+}
+
+.step-prompt {
+  padding: 9px 12px;
+  font-size: 11.5px;
+  color: var(--dim2);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── LOG PANEL ──────────────────────────────────── */
+.log-panel {
+  border-top: 1px solid var(--border);
+  background: var(--bg2);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: 200px;
+  transition: max-height 0.2s;
+}
+.log-panel.collapsed { max-height: 32px; overflow: hidden; }
+
+.log-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 14px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+}
+.log-header-label {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+  flex: 1;
+}
+.log-header-label.running { color: var(--amber); animation: pulse 1s infinite; }
+.log-header-label.done    { color: var(--cyan); }
+.log-header-label.error   { color: var(--red); }
+.log-toggle { font-size: 10px; color: var(--dim); }
+
+.log-body {
+  overflow-y: auto;
+  flex: 1;
+  padding: 6px 14px;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.log-body::-webkit-scrollbar { width: 3px; }
+.log-body::-webkit-scrollbar-thumb { background: var(--border2); }
+
+.log-line { display: flex; gap: 6px; padding: 1px 0; animation: rise 0.1s ease; }
+.log-icon { flex-shrink: 0; color: var(--dim); }
+.log-text { color: var(--dim2); word-break: break-word; }
+.log-line.progress  .log-icon { color: var(--blue); }
+.log-line.done      .log-icon,.log-line.done .log-text { color: var(--cyan); }
+.log-line.error     .log-icon,.log-line.error .log-text { color: var(--red); }
+.log-line.file_write .log-icon,.log-line.file_write .log-text { color: var(--amber); }
+.log-line.step-done .log-icon,.log-line.step-done .log-text { color: var(--cyan); }
+.log-line.step-skip .log-text { color: var(--dim); }
+.log-line.kept      .log-text { color: var(--green); }
+.log-line.discarded .log-text { color: var(--dim); }
+
+/* ── MODAL ──────────────────────────────────────── */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.72);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 100;
+  animation: rise 0.15s ease;
+  padding: 20px;
+}
+
+.modal {
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: 5px;
+  width: min(90vw, 560px);
+  display: flex; flex-direction: column;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.6);
+}
+
+.modal-header {
+  display: flex; align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg3);
+  flex-shrink: 0;
+  gap: 10px;
+}
+.modal-title {
+  flex: 1;
+  font-size: 12px; font-weight: 600;
+  color: var(--amber);
+  letter-spacing: 0.04em;
+}
+.modal-close {
+  background: none; border: none; color: var(--dim);
+  cursor: pointer; font-size: 15px; padding: 2px 6px;
+  border-radius: 2px; line-height: 1;
+  transition: color 0.1s, background 0.1s;
+}
+.modal-close:hover { color: var(--text); background: var(--bg4); }
+
+.modal-body { padding: 18px; display: flex; flex-direction: column; gap: 14px; }
+
+.field { display: flex; flex-direction: column; gap: 5px; }
+.field label {
+  font-size: 9.5px; font-weight: 600; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--dim);
+}
+.field input, .field textarea {
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  border-radius: 3px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  padding: 8px 10px;
+  outline: none;
+  transition: border-color 0.15s;
+  width: 100%;
+}
+.field input:focus, .field textarea:focus { border-color: var(--amber-brd); }
+.field input::placeholder, .field textarea::placeholder { color: var(--dim); }
+.field textarea { resize: vertical; min-height: 70px; line-height: 1.6; }
+.field-hint { font-size: 10.5px; color: var(--dim); margin-top: -2px; }
+
+.field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+.modal-footer {
+  display: flex; justify-content: flex-end; gap: 8px;
+  padding: 12px 18px; border-top: 1px solid var(--border);
+}
+
+.btn {
+  background: var(--bg3); border: 1px solid var(--border2);
+  border-radius: 3px; color: var(--dim2);
+  font-family: var(--mono); font-size: 11px;
+  padding: 7px 16px; cursor: pointer;
+  transition: color 0.1s, border-color 0.1s; letter-spacing: 0.05em;
+}
+.btn:hover { color: var(--text); border-color: var(--amber-brd); }
+.btn.primary {
+  background: var(--amber); border-color: var(--amber); color: #000;
+  font-family: var(--display); font-weight: 800;
+  font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase;
+}
+.btn.primary:hover { background: #f0b042; border-color: #f0b042; }
+.btn.primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── CONFIRM DIALOG ─────────────────────────────── */
+.confirm-dialog {
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: 5px;
+  width: min(90vw, 400px);
+  box-shadow: 0 24px 60px rgba(0,0,0,0.6);
+  overflow: hidden;
+}
+.confirm-body { padding: 20px; color: var(--text); font-size: 12.5px; line-height: 1.7; }
+.confirm-body strong { color: var(--amber); }
+.confirm-footer {
+  display: flex; justify-content: flex-end; gap: 8px;
+  padding: 12px 18px; border-top: 1px solid var(--border);
+}
+.btn.danger:hover { color: var(--red); border-color: var(--red-brd); background: var(--red-lo); }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <header>
+    <div class="logo"><a href="agent-harness.html">agent</a><em>/workflows</em></div>
+    <div class="header-sep"></div>
+    <a href="skills.html" style="font-size:10px;color:var(--dim2);text-decoration:none;letter-spacing:0.08em;padding:4px 8px;border:1px solid var(--border);border-radius:3px;transition:color .1s,border-color .1s;" onmouseover="this.style.color='var(--text)';this.style.borderColor='var(--amber-brd)'" onmouseout="this.style.color='var(--dim2)';this.style.borderColor='var(--border)'">⚡ skills</a>
+    <button class="header-btn" id="refresh-btn">↻ refresh</button>
+    <button class="header-btn primary" id="new-wf-btn">+ new workflow</button>
+    <button class="header-btn" id="theme-toggle">light</button>
+  </header>
+
+  <div class="config-bar">
+    <label>API key</label>
+    <input type="password" id="api-key" placeholder="sk-ant-… (required for create / run / RSI)" autocomplete="off" />
+    <span class="sep">│</span>
+    <label>RSI budget</label>
+    <input type="number" id="global-budget" value="3" min="1" max="20" style="width:52px;" />
+    <span class="status-text" id="global-status">ready</span>
+  </div>
+
+  <main>
+    <!-- LEFT: workflow list -->
+    <div class="panel-left">
+      <div class="list-toolbar">
+        <input class="search-input" id="search" placeholder="filter workflows…" autocomplete="off" />
+        <span class="item-count" id="wf-count">0</span>
+      </div>
+      <div class="wf-list" id="wf-list">
+        <div class="wf-list-empty">Loading…</div>
+      </div>
+    </div>
+
+    <!-- RIGHT: detail -->
+    <div class="panel-right">
+      <div class="detail-toolbar">
+        <div class="detail-title empty" id="detail-title">Select a workflow</div>
+        <button class="tool-btn run"     id="run-btn"     disabled title="Run or resume this workflow">▶ run</button>
+        <button class="tool-btn"         id="improve-btn" disabled title="Revise step prompts via agent">✎ improve</button>
+        <button class="tool-btn rsi"     id="rsi-btn"     disabled title="Iterate workflow definition via RSI">⟳ rsi</button>
+        <button class="tool-btn danger"  id="delete-btn"  disabled title="Delete this workflow">✕ delete</button>
+      </div>
+
+      <div class="detail-body" id="detail-body">
+        <div class="detail-empty">
+          <div class="big">⬡</div>
+          <div>Select a workflow from the list<br>or create a new one.</div>
+        </div>
+      </div>
+
+      <div class="log-panel collapsed" id="log-panel">
+        <div class="log-header" id="log-toggle-btn">
+          <span class="log-header-label" id="log-label">Log</span>
+          <span class="log-toggle" id="log-toggle-icon">▲</span>
+        </div>
+        <div class="log-body" id="log-body"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Create/Improve Modal -->
+<div class="modal-overlay" id="wf-modal" style="display:none;">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="modal-title">New Workflow</div>
+      <button class="modal-close" id="modal-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label>Workflow name</label>
+        <input type="text" id="modal-name" placeholder="e.g. weekly-report" autocomplete="off" />
+        <div class="field-hint">slug, no spaces</div>
+      </div>
+      <div class="field" id="modal-goal-field">
+        <label id="modal-goal-label">Goal</label>
+        <textarea id="modal-goal" placeholder="Describe what this workflow should accomplish…" rows="3"></textarea>
+        <div class="field-hint" id="modal-goal-hint">The agent will design steps to achieve this goal.</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" id="modal-cancel">Cancel</button>
+      <button class="btn primary" id="modal-run">Create →</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { createVFS, execute, extractCode } from './src/agent-core.js';
+import { runTurn, buildSkillIndex } from './src/agent-loop.js';
+import {
+  buildCreatePrompt, buildImprovePrompt,
+  listWorkflows, runWorkflowSteps, runWorkflowRSI, buildWorkflowScorer
+} from './src/workflow-runner.js';
+import { getLLMClient } from './src/llm-client.js';
+
+// ════════════════════════════════════════════════════
+// THEME
+// ════════════════════════════════════════════════════
+
+const themeBtn = document.getElementById('theme-toggle');
+function applyTheme(light) {
+  document.documentElement.classList.toggle('light', light);
+  themeBtn.textContent = light ? 'dark' : 'light';
+  localStorage.setItem('aaron-theme', light ? 'light' : 'dark');
+}
+const savedTheme = localStorage.getItem('aaron-theme');
+applyTheme(savedTheme ? savedTheme === 'light' : window.matchMedia('(prefers-color-scheme: light)').matches);
+themeBtn.addEventListener('click', () => applyTheme(!document.documentElement.classList.contains('light')));
+
+// ════════════════════════════════════════════════════
+// VFS + HYDRATION
+// ════════════════════════════════════════════════════
+
+const vfs = createVFS();
+
+async function hydrateVFS() {
+  for (const f of ['agent-core.js', 'agent-loop.js']) {
+    try {
+      const content = await fetch(`src/${f}`).then(r => r.text());
+      vfs.write(`/harness/${f}`, content);
+      vfs.markClean(`/harness/${f}`);
+    } catch { /* skip */ }
+  }
+
+  try {
+    const manifest = await fetch('vfs-manifest.json').then(r => {
+      if (!r.ok) throw new Error('no manifest');
+      return r.json();
+    });
+    for (const f of (manifest.skills ?? [])) {
+      try {
+        const content = await fetch(`skills/${f}`).then(r => r.text());
+        vfs.write(`/skills/${f}`, content);
+        vfs.markClean(`/skills/${f}`);
+      } catch { /* skip */ }
+    }
+    for (const f of (manifest.memory ?? [])) {
+      try {
+        const content = await fetch(`memory/${f}`).then(r => r.text());
+        vfs.write(`/memory/${f}`, content);
+        vfs.markClean(`/memory/${f}`);
+      } catch { /* skip */ }
+    }
+  } catch { /* no manifest */ }
+
+  // Load workflows from disk
+  try {
+    const res = await fetch('vfs-manifest.json').then(r => r.json()).catch(() => null);
+    if (res?.workflows) {
+      for (const f of res.workflows) {
+        try {
+          const content = await fetch(`workflows/${f}`).then(r => r.text());
+          vfs.write(`/workflows/${f}`, content);
+          vfs.markClean(`/workflows/${f}`);
+        } catch { /* skip */ }
+      }
+    }
+  } catch { /* skip */ }
+
+  // Fallback: discover workflow files via directory listing
+  const wfPaths = vfs.list().filter(p => p.startsWith('/workflows/') && p.endsWith('.json'));
+  if (wfPaths.length === 0) {
+    try {
+      const listing = await fetch('workflows/').then(r => r.text());
+      const files = [...listing.matchAll(/href="([^"]+\.json)"/g)].map(m => m[1]);
+      for (const f of files) {
+        try {
+          const content = await fetch(`workflows/${f}`).then(r => r.text());
+          vfs.write(`/workflows/${f}`, content);
+          vfs.markClean(`/workflows/${f}`);
+        } catch { /* skip */ }
+      }
+    } catch { /* no listing */ }
+  }
+}
+
+function flushWorkflowToDisk(name, content) {
+  // Can't write to disk from browser — dirty flag signals uncommitted state
+}
+
+// ════════════════════════════════════════════════════
+// WORKFLOW PARSING
+// ════════════════════════════════════════════════════
+
+function getWfState() {
+  try { return JSON.parse(vfs.read('/scratch/workflow-state.json') || 'null'); } catch { return null; }
+}
+
+function parseWorkflow(path) {
+  try {
+    const raw = vfs.read(path);
+    const wf  = JSON.parse(raw ?? '{}');
+    const wfState = getWfState();
+    const active  = wfState?.workflow === wf.name;
+    const done    = active && (wfState.completedSteps?.length ?? 0) >= (wf.steps?.length ?? 0);
+    return {
+      name:         wf.name ?? path.split('/').pop().replace('.json', ''),
+      description:  wf.description ?? '',
+      steps:        wf.steps ?? [],
+      path,
+      status:       active ? (done ? 'complete' : 'in-progress') : 'not-started',
+      completedSteps: active ? (wfState.completedSteps ?? []) : [],
+      currentStep:  active ? wfState.currentStep : null,
+    };
+  } catch {
+    return { name: path, description: '', steps: [], path, status: 'not-started', completedSteps: [], currentStep: null };
+  }
+}
+
+function getAllWorkflows() {
+  return vfs.list()
+    .filter(p => p.startsWith('/workflows/') && p.endsWith('.json'))
+    .map(parseWorkflow);
+}
+
+// ════════════════════════════════════════════════════
+// UI STATE
+// ════════════════════════════════════════════════════
+
+let allWorkflows    = [];
+let selectedWf      = null;
+let searchQuery     = '';
+let opRunning       = false;
+let activeStepId    = null; // step currently executing
+
+const wfListEl     = document.getElementById('wf-list');
+const wfCountEl    = document.getElementById('wf-count');
+const searchEl     = document.getElementById('search');
+const detailTitleEl = document.getElementById('detail-title');
+const detailBodyEl  = document.getElementById('detail-body');
+const runBtn        = document.getElementById('run-btn');
+const improveBtn    = document.getElementById('improve-btn');
+const rsiBtn        = document.getElementById('rsi-btn');
+const deleteBtn     = document.getElementById('delete-btn');
+const globalStatus  = document.getElementById('global-status');
+const apiKeyEl      = document.getElementById('api-key');
+const globalBudget  = document.getElementById('global-budget');
+
+// Restore saved API key
+const savedKey = localStorage.getItem('ANTHROPIC_API_KEY') || localStorage.getItem('aaron-apikey') || '';
+if (savedKey) apiKeyEl.value = savedKey;
+apiKeyEl.addEventListener('change', () => {
+  const k = apiKeyEl.value.trim();
+  if (k) localStorage.setItem('ANTHROPIC_API_KEY', k);
+});
+
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Status badge HTML ─────────────────────────────
+function statusBadge(wf) {
+  if (wf.status === 'complete')    return `<span class="status-badge complete">✓ complete</span>`;
+  if (wf.status === 'in-progress') return `<span class="status-badge in-progress">step: ${esc(wf.currentStep ?? '?')}</span>`;
+  return `<span class="status-badge not-started">not started</span>`;
+}
+
+// ── Render list ───────────────────────────────────
+function renderList() {
+  const q = searchQuery.toLowerCase();
+  const visible = allWorkflows.filter(w =>
+    !q || w.name.toLowerCase().includes(q) || w.description.toLowerCase().includes(q)
+  );
+  wfCountEl.textContent = visible.length;
+
+  if (visible.length === 0) {
+    wfListEl.innerHTML = allWorkflows.length === 0
+      ? `<div class="wf-list-empty">No workflows yet.<br><br>Click <strong>+ new workflow</strong> to create one.</div>`
+      : `<div class="wf-list-empty">No workflows match "<em>${esc(searchQuery)}</em>".</div>`;
+    return;
+  }
+
+  wfListEl.innerHTML = visible.map(w => `
+    <div class="wf-card${selectedWf?.path === w.path ? ' active' : ''}" data-path="${esc(w.path)}">
+      <div class="wf-card-name">${esc(w.name)}</div>
+      ${w.description ? `<div class="wf-card-desc">${esc(w.description)}</div>` : ''}
+      <div class="wf-card-meta">
+        ${statusBadge(w)}
+        <span class="step-count">${w.steps.length} step${w.steps.length !== 1 ? 's' : ''}</span>
+      </div>
+    </div>
+  `).join('');
+
+  wfListEl.querySelectorAll('.wf-card').forEach(el => {
+    el.addEventListener('click', () => {
+      const wf = allWorkflows.find(w => w.path === el.dataset.path);
+      if (wf) selectWorkflow(wf);
+    });
+  });
+}
+
+// ── Render detail ─────────────────────────────────
+function selectWorkflow(wf) {
+  selectedWf = wf;
+  activeStepId = null;
+  renderList();
+
+  detailTitleEl.textContent = wf.name;
+  detailTitleEl.classList.remove('empty');
+  setDetailButtons(!opRunning);
+
+  renderDetail(wf);
+}
+
+function renderDetail(wf, activeStep = null) {
+  const completedSet = new Set(wf.completedSteps ?? []);
+
+  const stepsHtml = wf.steps.map(step => {
+    const isDone   = completedSet.has(step.id);
+    const isActive = step.id === activeStep;
+    const cls      = isDone ? 'done' : isActive ? 'active' : '';
+    const icon     = isDone ? '✓' : isActive ? '◉' : '';
+    const iconCls  = isDone ? 'done' : isActive ? 'active' : '';
+    const prompt   = step.prompt ?? '';
+
+    return `
+      <div class="step-card ${cls}" id="step-${esc(step.id)}">
+        <div class="step-header">
+          <div class="step-status-icon ${iconCls}">${icon}</div>
+          <div class="step-id">${esc(step.id)}</div>
+          ${step.skill ? `<span class="step-skill-tag">⚡ ${esc(step.skill)}</span>` : ''}
+        </div>
+        <div class="step-prompt">${esc(prompt)}</div>
+      </div>`;
+  }).join('');
+
+  detailBodyEl.innerHTML = `
+    <div class="wf-view">
+      <div class="wf-meta-bar">
+        <div class="meta-field">
+          <div class="meta-key">Name</div>
+          <div class="meta-val amber">${esc(wf.name)}</div>
+        </div>
+        <div class="meta-field">
+          <div class="meta-key">Status</div>
+          <div class="meta-val">${statusBadge(wf)}</div>
+        </div>
+        <div class="meta-field">
+          <div class="meta-key">Steps</div>
+          <div class="meta-val">${wf.steps.length} (${wf.completedSteps.length} done)</div>
+        </div>
+        ${wf.description ? `<div class="meta-field" style="flex:2;min-width:200px;">
+          <div class="meta-key">Description</div>
+          <div class="meta-val">${esc(wf.description)}</div>
+        </div>` : ''}
+      </div>
+      ${wf.steps.length === 0
+        ? `<div class="detail-empty"><div>No steps defined.</div></div>`
+        : `<div class="steps-list">${stepsHtml}</div>`
+      }
+    </div>`;
+}
+
+function markStepActive(stepId) {
+  activeStepId = stepId;
+  if (!selectedWf) return;
+  // Update just the step cards rather than full re-render
+  detailBodyEl.querySelectorAll('.step-card').forEach(el => {
+    const id = el.id.replace('step-', '');
+    const completedSet = new Set(selectedWf.completedSteps ?? []);
+    const isDone   = completedSet.has(id);
+    const isActive = id === stepId;
+    el.className = 'step-card' + (isDone ? ' done' : isActive ? ' active' : '');
+    const icon = el.querySelector('.step-status-icon');
+    if (icon) {
+      icon.className = 'step-status-icon' + (isDone ? ' done' : isActive ? ' active' : '');
+      icon.textContent = isDone ? '✓' : isActive ? '◉' : '';
+    }
+    const idEl = el.querySelector('.step-id');
+    if (idEl) idEl.style.color = '';
+  });
+}
+
+function markStepDone(stepId) {
+  if (!selectedWf) return;
+  if (!selectedWf.completedSteps.includes(stepId)) selectedWf.completedSteps.push(stepId);
+  // Re-read checkpoint
+  const st = getWfState();
+  if (st && st.workflow === selectedWf.name) {
+    selectedWf.completedSteps = st.completedSteps ?? [];
+    selectedWf.currentStep    = st.currentStep;
+    selectedWf.status         = selectedWf.completedSteps.length >= selectedWf.steps.length ? 'complete' : 'in-progress';
+  }
+  markStepActive(null);
+  renderDetail(selectedWf, null);
+  renderList();
+}
+
+// ── Set action buttons ────────────────────────────
+function setDetailButtons(enabled) {
+  const has = !!selectedWf;
+  runBtn.disabled     = !has || !enabled;
+  improveBtn.disabled = !has || !enabled;
+  rsiBtn.disabled     = !has || !enabled;
+  deleteBtn.disabled  = !has || !enabled;
+  document.getElementById('new-wf-btn').disabled = !enabled;
+}
+
+// ── Search ────────────────────────────────────────
+searchEl.addEventListener('input', () => { searchQuery = searchEl.value; renderList(); });
+
+// ── Refresh ───────────────────────────────────────
+document.getElementById('refresh-btn').addEventListener('click', async () => {
+  setStatus('refreshing…', 'running');
+  await hydrateVFS();
+  allWorkflows = getAllWorkflows();
+  renderList();
+  if (selectedWf) {
+    const updated = allWorkflows.find(w => w.path === selectedWf.path);
+    if (updated) selectWorkflow(updated);
+  }
+  setStatus(`${allWorkflows.length} workflow(s) loaded`, 'ok', 2500);
+});
+
+// ════════════════════════════════════════════════════
+// LOG PANEL
+// ════════════════════════════════════════════════════
+
+const logPanel   = document.getElementById('log-panel');
+const logLabel   = document.getElementById('log-label');
+const logBody    = document.getElementById('log-body');
+const logToggle  = document.getElementById('log-toggle-btn');
+const logIcon    = document.getElementById('log-toggle-icon');
+
+logToggle.addEventListener('click', () => {
+  logPanel.classList.toggle('collapsed');
+  logIcon.textContent = logPanel.classList.contains('collapsed') ? '▲' : '▼';
+});
+
+const EV_ICONS = { progress:'◆', result:'→', file_write:'✦', file_read:'◇', done:'✓', error:'✕', metric:'▪', experiment:'◉' };
+
+function logClear() {
+  logBody.innerHTML = '';
+  logPanel.classList.remove('collapsed');
+  logIcon.textContent = '▼';
+}
+
+function logAppend(text, cls = 'progress', icon = '◆') {
+  const el = document.createElement('div');
+  el.className = `log-line ${cls}`;
+  el.innerHTML = `<span class="log-icon">${icon}</span><span class="log-text">${esc(text)}</span>`;
+  logBody.appendChild(el);
+  logBody.scrollTop = logBody.scrollHeight;
+}
+
+function logEvent(ev) {
+  const icon = EV_ICONS[ev.type] ?? '·';
+  let text = '', cls = ev.type;
+  switch (ev.type) {
+    case 'progress':   text = ev.message ?? ''; break;
+    case 'file_write': text = `wrote ${ev.path}`; break;
+    case 'done':       text = ev.message ?? 'done'; break;
+    case 'error':      text = ev.message ?? 'error'; break;
+    case 'metric':     text = `${ev.name}: ${ev.value} ${ev.unit ?? ''}`; break;
+    case 'experiment':
+      cls  = ev.kept ? 'kept' : 'discarded';
+      text = `${ev.kept ? '✓ kept' : '✗ discarded'}: ${ev.reason ?? ''}`;
+      break;
+    default: text = JSON.stringify(ev);
+  }
+  logAppend(text, cls, icon);
+}
+
+function setLogStatus(s) {
+  const labels = { running: 'Running…', done: 'Done', error: 'Error' };
+  logLabel.textContent  = labels[s] ?? 'Log';
+  logLabel.className    = `log-header-label ${s}`;
+}
+
+function setStatus(msg, cls = '', timeout = 0) {
+  globalStatus.textContent = msg;
+  globalStatus.className   = `status-text ${cls}`;
+  if (timeout) setTimeout(() => { globalStatus.textContent = 'ready'; globalStatus.className = 'status-text'; }, timeout);
+}
+
+// ════════════════════════════════════════════════════
+// AGENT SETUP
+// ════════════════════════════════════════════════════
+
+function requireKey() {
+  const k = apiKeyEl.value.trim();
+  if (!k) { alert('Enter your Anthropic API key in the config bar first.'); return false; }
+  localStorage.setItem('ANTHROPIC_API_KEY', k);
+  return true;
+}
+
+function makeContext() {
+  return {
+    vfs,
+    fetch: (...a) => fetch(...a),
+    emit: (ev) => logEvent(ev),
+    env: {},
+    skillIndex: buildSkillIndex(vfs),
+    async commit(msg = 'commit') {
+      const dirty = vfs.list().filter(p => vfs.isDirty(p));
+      for (const p of dirty) vfs.markClean(p);
+      return dirty;
+    },
+  };
+}
+
+function makeState() {
+  return { history: [], turn: 0, context: makeContext() };
+}
+
+function makeDeps(extraEmit = null) {
+  const uiAdapter = {
+    setStatus() {},
+    showCode() {},
+    emitEvent(ev) {
+      logEvent(ev);
+      if (extraEmit) extraEmit(ev);
+    },
+    onRetry(a, m) { logAppend(`retry ${a}/${m}`, 'progress', '↺'); },
+    onTurnComplete() {},
+  };
+  return { execute, extractCode, runTurn, ui: uiAdapter };
+}
+
+// ════════════════════════════════════════════════════
+// RUN WORKFLOW
+// ════════════════════════════════════════════════════
+
+runBtn.addEventListener('click', async () => {
+  if (!selectedWf || opRunning) return;
+  if (!requireKey()) return;
+
+  opRunning = true;
+  setDetailButtons(false);
+  logClear();
+  setLogStatus('running');
+  setStatus(`Running ${selectedWf.name}…`, 'running');
+  runBtn.textContent = '⏹ running…';
+
+  const wfRaw = vfs.read(selectedWf.path);
+  if (!wfRaw) { logAppend('Workflow not found in VFS.', 'error', '✕'); endOp(); return; }
+
+  let wf;
+  try { wf = JSON.parse(wfRaw); }
+  catch { logAppend('Invalid workflow JSON.', 'error', '✕'); endOp(); return; }
+
+  // Reload with current checkpoint state
+  selectedWf = parseWorkflow(selectedWf.path);
+  renderDetail(selectedWf, null);
+
+  const state = makeState();
+  // Restore saved history if resuming
+  try {
+    const savedHistory = vfs.read('/memory/agent-history.json');
+    if (savedHistory && selectedWf.completedSteps.length > 0) {
+      state.history = JSON.parse(savedHistory);
+    }
+  } catch { /* ignore */ }
+
+  const deps = makeDeps();
+
+  try {
+    await runWorkflowSteps(wf, wf.name, vfs, state, deps, {
+      onStepStart:    (id, preview) => {
+        logAppend(`▶ [${id}] ${preview}`, 'progress', '◆');
+        markStepActive(id);
+      },
+      onStepVerifying: (id) => logAppend(`↺ [${id}] verifying…`, 'progress', '↺'),
+      onStepDone:      (id) => {
+        logAppend(`✓ [${id}] complete`, 'step-done', '✓');
+        markStepDone(id);
+      },
+      onStepSkipped:  (id) => {
+        logAppend(`✓ [${id}] already done`, 'step-skip', '·');
+        markStepDone(id);
+      },
+      onCheckpointUpdated: (id) => logAppend(`checkpoint updated for ${id}`, 'progress', '·'),
+      onComplete: (name) => {
+        logAppend(`Workflow "${name}" complete!`, 'done', '✓');
+        setLogStatus('done');
+      },
+      onUserMsg: () => {},
+    });
+
+    // Reload and re-render with final state
+    allWorkflows = getAllWorkflows();
+    selectedWf   = allWorkflows.find(w => w.path === selectedWf.path) ?? selectedWf;
+    renderDetail(selectedWf, null);
+    renderList();
+    setStatus('Workflow complete', 'ok', 4000);
+
+  } catch (e) {
+    logAppend(e.message, 'error', '✕');
+    setLogStatus('error');
+    setStatus(`Error: ${e.message.slice(0, 60)}`, 'error');
+  } finally {
+    endOp();
+    runBtn.textContent = '▶ run';
+  }
+});
+
+// ════════════════════════════════════════════════════
+// IMPROVE
+// ════════════════════════════════════════════════════
+
+improveBtn.addEventListener('click', () => {
+  if (!selectedWf) return;
+  openModal('improve', selectedWf.name);
+});
+
+// ════════════════════════════════════════════════════
+// RSI
+// ════════════════════════════════════════════════════
+
+rsiBtn.addEventListener('click', async () => {
+  if (!selectedWf || opRunning) return;
+  if (!requireKey()) return;
+
+  const budget = parseInt(globalBudget.value, 10) || 3;
+
+  opRunning = true;
+  setDetailButtons(false);
+  logClear();
+  setLogStatus('running');
+  setStatus(`RSI: ${selectedWf.name} (${budget} experiments)…`, 'running');
+
+  const state  = makeState();
+  const deps   = makeDeps();
+  const scorer = buildWorkflowScorer(getLLMClient());
+
+  try {
+    const results = await runWorkflowRSI({
+      wfName: selectedWf.name,
+      budget,
+      state,
+      deps,
+      scorer,
+      log: (msg) => logAppend(msg, 'progress', '◆'),
+    });
+
+    const kept = results.filter(r => r.kept).length;
+    logAppend(`RSI complete: ${kept}/${results.length} experiments kept`, 'done', '✓');
+    setLogStatus('done');
+
+    allWorkflows = getAllWorkflows();
+    selectedWf   = allWorkflows.find(w => w.path === selectedWf.path) ?? selectedWf;
+    renderDetail(selectedWf, null);
+    renderList();
+    setStatus(`RSI done — ${kept}/${results.length} kept`, 'ok', 4000);
+
+  } catch (e) {
+    logAppend(e.message, 'error', '✕');
+    setLogStatus('error');
+    setStatus(`Error: ${e.message.slice(0, 60)}`, 'error');
+  } finally {
+    endOp();
+  }
+});
+
+// ════════════════════════════════════════════════════
+// DELETE
+// ════════════════════════════════════════════════════
+
+deleteBtn.addEventListener('click', () => {
+  if (!selectedWf) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="confirm-dialog">
+      <div class="confirm-body">
+        Delete workflow <strong>${esc(selectedWf.name)}</strong>?<br>
+        <span style="color:var(--dim);font-size:11px;">Removes from VFS. File on disk is unaffected until refresh.</span>
+      </div>
+      <div class="confirm-footer">
+        <button class="btn" id="conf-cancel">Cancel</button>
+        <button class="btn danger" id="conf-ok">Delete</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#conf-cancel').onclick = () => overlay.remove();
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  overlay.querySelector('#conf-ok').onclick = () => {
+    overlay.remove();
+    vfs.write(selectedWf.path, null);
+    allWorkflows = getAllWorkflows();
+    selectedWf   = null;
+    detailTitleEl.textContent = 'Select a workflow';
+    detailTitleEl.classList.add('empty');
+    detailBodyEl.innerHTML = `<div class="detail-empty"><div class="big">⬡</div><div>Select a workflow from the list<br>or create a new one.</div></div>`;
+    setDetailButtons(false);
+    renderList();
+  };
+});
+
+// ════════════════════════════════════════════════════
+// CREATE / IMPROVE MODAL
+// ════════════════════════════════════════════════════
+
+let modalMode = 'create';
+
+const modal          = document.getElementById('wf-modal');
+const modalTitle     = document.getElementById('modal-title');
+const modalNameEl    = document.getElementById('modal-name');
+const modalGoalEl    = document.getElementById('modal-goal');
+const modalGoalLabel = document.getElementById('modal-goal-label');
+const modalGoalHint  = document.getElementById('modal-goal-hint');
+const modalRunBtn    = document.getElementById('modal-run');
+
+function openModal(mode, presetName = '') {
+  modalMode = mode;
+  if (mode === 'improve') {
+    modalTitle.textContent  = `Improve: ${presetName}`;
+    modalNameEl.value       = presetName;
+    modalNameEl.disabled    = true;
+    modalGoalLabel.textContent = 'Feedback';
+    modalGoalEl.value       = '';
+    modalGoalEl.placeholder = 'Describe what to change or improve about this workflow…';
+    modalGoalHint.textContent = 'The agent will revise step prompts to address your feedback.';
+    modalRunBtn.textContent = 'Improve →';
+  } else {
+    modalTitle.textContent  = 'New Workflow';
+    modalNameEl.value       = '';
+    modalNameEl.disabled    = false;
+    modalGoalLabel.textContent = 'Goal';
+    modalGoalEl.value       = '';
+    modalGoalEl.placeholder = 'Describe what this workflow should accomplish…';
+    modalGoalHint.textContent = 'The agent will design 3-5 steps to achieve this goal.';
+    modalRunBtn.textContent = 'Create →';
+  }
+  modal.style.display = 'flex';
+  setTimeout(() => (modalMode === 'create' ? modalNameEl : modalGoalEl).focus(), 50);
+}
+
+function closeModal() { modal.style.display = 'none'; }
+
+document.getElementById('new-wf-btn').addEventListener('click', () => openModal('create'));
+document.getElementById('modal-close').addEventListener('click', closeModal);
+document.getElementById('modal-cancel').addEventListener('click', closeModal);
+modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+modalRunBtn.addEventListener('click', async () => {
+  const name = modalNameEl.value.trim().replace(/[^a-zA-Z0-9_-]/g, '-');
+  const goal = modalGoalEl.value.trim();
+  if (!name) { modalNameEl.focus(); return; }
+  if (!goal) { modalGoalEl.focus(); return; }
+  if (!requireKey()) return;
+
+  closeModal();
+  opRunning = true;
+  setDetailButtons(false);
+  logClear();
+  setLogStatus('running');
+  setStatus(modalMode === 'create' ? `Creating ${name}…` : `Improving ${name}…`, 'running');
+
+  const state  = makeState();
+  const deps   = makeDeps();
+  const prompt = modalMode === 'create'
+    ? buildCreatePrompt(name, goal)
+    : buildImprovePrompt(name, goal);
+
+  try {
+    await runTurn(prompt, state, deps);
+
+    allWorkflows = getAllWorkflows();
+    const created = allWorkflows.find(w => w.name === name);
+    if (created) selectWorkflow(created);
+    renderList();
+    setLogStatus('done');
+    setStatus(modalMode === 'create' ? `Created ${name}` : `Improved ${name}`, 'ok', 3000);
+
+  } catch (e) {
+    logAppend(e.message, 'error', '✕');
+    setLogStatus('error');
+    setStatus(`Error: ${e.message.slice(0, 60)}`, 'error');
+  } finally {
+    endOp();
+  }
+});
+
+// ════════════════════════════════════════════════════
+// HELPERS
+// ════════════════════════════════════════════════════
+
+function endOp() {
+  opRunning = false;
+  setDetailButtons(true);
+}
+
+// ════════════════════════════════════════════════════
+// INIT
+// ════════════════════════════════════════════════════
+
+async function init() {
+  setStatus('loading…', 'running');
+  await hydrateVFS();
+  allWorkflows = getAllWorkflows();
+  renderList();
+  setStatus(`${allWorkflows.length} workflow(s) loaded`, 'ok', 2000);
+}
+
+init();
+</script>
+</body>
+</html>

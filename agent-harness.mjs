@@ -266,9 +266,9 @@ function loadDirToVFS(baseDir, vfsPrefix, vfs) {
   }
 }
 
-/** Write a manifest of artifacts + memory + skills files for the browser harness to discover. */
+/** Write a manifest of artifacts + memory + skills + workflows files for the browser harness to discover. */
 function writeManifest() {
-  const manifest = { artifacts: [], memory: [], skills: [] };
+  const manifest = { artifacts: [], memory: [], skills: [], workflows: [] };
   const artifactsDir = join(__dirname, 'artifacts');
   if (existsSync(artifactsDir)) manifest.artifacts = readdirSync(artifactsDir);
   const memoryDir = join(__dirname, 'memory');
@@ -282,6 +282,8 @@ function writeManifest() {
       }
     })(skillsDir, '');
   }
+  const workflowsDir = join(__dirname, 'workflows');
+  if (existsSync(workflowsDir)) manifest.workflows = readdirSync(workflowsDir).filter(f => f.endsWith('.json'));
   writeFileSync(join(__dirname, 'vfs-manifest.json'), JSON.stringify(manifest), 'utf8');
 }
 
