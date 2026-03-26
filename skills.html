@@ -1,0 +1,1346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>aaron / skills</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;1,400&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:       #09090b;
+  --bg2:      #0f0f12;
+  --bg3:      #16161a;
+  --bg4:      #1e1e24;
+  --border:   #252530;
+  --border2:  #2e2e3a;
+  --text:     #c4c0b8;
+  --dim:      #4e4e5a;
+  --dim2:     #6a6a78;
+  --amber:    #e8a030;
+  --amber-lo: rgba(232,160,48,0.08);
+  --amber-brd:rgba(232,160,48,0.3);
+  --cyan:     #32d4b0;
+  --cyan-lo:  rgba(50,212,176,0.06);
+  --cyan-brd: rgba(50,212,176,0.25);
+  --red:      #d95050;
+  --red-lo:   rgba(217,80,80,0.08);
+  --red-brd:  rgba(217,80,80,0.3);
+  --green:    #5ab870;
+  --blue:     #5888d8;
+  --mono:     'JetBrains Mono', monospace;
+  --display:  'Syne', sans-serif;
+}
+
+html.light {
+  --bg:       #f5f4f0;
+  --bg2:      #edece7;
+  --bg3:      #e4e3de;
+  --bg4:      #d8d7d1;
+  --border:   #cccbc3;
+  --border2:  #b5b4ac;
+  --text:     #28271f;
+  --dim:      #7a7870;
+  --dim2:     #5e5d55;
+  --amber:    #b86c10;
+  --amber-lo: rgba(184,108,16,0.09);
+  --amber-brd:rgba(184,108,16,0.28);
+  --cyan:     #1a8f74;
+  --cyan-lo:  rgba(26,143,116,0.07);
+  --cyan-brd: rgba(26,143,116,0.25);
+  --red:      #b83030;
+  --red-lo:   rgba(184,48,48,0.07);
+  --red-brd:  rgba(184,48,48,0.28);
+  --green:    #2e7a3e;
+  --blue:     #2d5aaa;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── LAYOUT ─────────────────────────────────────── */
+#app {
+  display: grid;
+  grid-template-rows: 42px auto 1fr;
+  height: 100vh;
+}
+
+/* ── HEADER ─────────────────────────────────────── */
+header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 18px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  z-index: 10;
+}
+
+.logo {
+  font-family: var(--display);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  color: var(--amber);
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.logo em { color: var(--dim2); font-style: normal; font-weight: 700; }
+.logo a { color: inherit; text-decoration: none; }
+.logo a:hover { text-decoration: underline; text-decoration-color: var(--border2); }
+
+.header-sep { flex: 1; height: 1px; background: var(--border); }
+
+.header-btn {
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  border-radius: 3px;
+  color: var(--dim2);
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: color 0.1s, border-color 0.1s;
+  flex-shrink: 0;
+  letter-spacing: 0.06em;
+}
+.header-btn:hover { color: var(--text); border-color: var(--amber-brd); }
+.header-btn.primary {
+  background: var(--amber);
+  border-color: var(--amber);
+  color: #000;
+  font-weight: 700;
+  font-family: var(--display);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+}
+.header-btn.primary:hover { background: #f0b042; border-color: #f0b042; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ── CONFIG BAR ─────────────────────────────────── */
+.config-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 14px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+
+.config-bar label { color: var(--dim); flex-shrink: 0; }
+
+.config-bar input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 3px 8px;
+  width: 220px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.config-bar input:focus { border-color: var(--amber-brd); }
+.config-bar input::placeholder { color: var(--dim); }
+
+.config-bar .sep { color: var(--border2); margin: 0 4px; }
+
+.config-bar .status-text {
+  margin-left: auto;
+  color: var(--dim);
+  font-size: 10.5px;
+}
+.config-bar .status-text.ok { color: var(--green); }
+.config-bar .status-text.running { color: var(--amber); animation: pulse 1s infinite; }
+.config-bar .status-text.error { color: var(--red); }
+
+/* ── MAIN ───────────────────────────────────────── */
+main {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  overflow: hidden;
+}
+
+/* ── LEFT: SKILL LIST ───────────────────────────── */
+.panel-left {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+}
+
+.list-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+  flex-shrink: 0;
+}
+
+.search-input {
+  flex: 1;
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  border-radius: 3px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  padding: 5px 9px;
+  outline: none;
+  transition: border-color 0.15s;
+  min-width: 0;
+}
+.search-input:focus { border-color: var(--amber-brd); }
+.search-input::placeholder { color: var(--dim); }
+
+.skill-count {
+  font-size: 10px;
+  color: var(--dim);
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg4);
+}
+
+.skill-list {
+  overflow-y: auto;
+  flex: 1;
+  padding: 6px;
+}
+.skill-list::-webkit-scrollbar { width: 3px; }
+.skill-list::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+.skill-list-empty {
+  padding: 20px 12px;
+  color: var(--dim);
+  font-size: 11.5px;
+  line-height: 1.7;
+}
+
+/* ── SKILL CARD ─────────────────────────────────── */
+.skill-card {
+  padding: 10px 12px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+  margin-bottom: 3px;
+  position: relative;
+}
+
+.skill-card:hover {
+  background: var(--bg3);
+  border-color: var(--border);
+}
+
+.skill-card.active {
+  background: var(--amber-lo);
+  border-color: var(--amber-brd);
+}
+
+.skill-card-name {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text);
+  margin-bottom: 3px;
+  letter-spacing: 0.02em;
+}
+
+.skill-card.active .skill-card-name { color: var(--amber); }
+
+.skill-card-desc {
+  font-size: 11px;
+  color: var(--dim2);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.skill-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.skill-tag {
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 2px;
+  background: var(--bg4);
+  border: 1px solid var(--border);
+  color: var(--dim2);
+}
+
+.skill-tag.new { background: var(--cyan-lo); border-color: var(--cyan-brd); color: var(--cyan); }
+
+.skill-size {
+  font-size: 9.5px;
+  color: var(--dim);
+  margin-left: auto;
+}
+
+/* ── RIGHT: DETAIL ──────────────────────────────── */
+.panel-right {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  overflow: hidden;
+}
+
+.detail-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+  flex-shrink: 0;
+}
+
+.detail-title {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--amber);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-title.empty { color: var(--dim); font-style: italic; font-weight: 400; }
+
+.tool-btn {
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  border-radius: 3px;
+  color: var(--dim2);
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: color 0.1s, border-color 0.1s, background 0.1s;
+  flex-shrink: 0;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+.tool-btn:hover { color: var(--text); border-color: var(--amber-brd); }
+.tool-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.tool-btn.danger:hover { color: var(--red); border-color: var(--red-brd); }
+.tool-btn.cyan:hover { color: var(--cyan); border-color: var(--cyan-brd); }
+
+/* ── DETAIL BODY ────────────────────────────────── */
+.detail-body {
+  overflow: auto;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.detail-body::-webkit-scrollbar { width: 4px; }
+.detail-body::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+/* Empty / placeholder state */
+.detail-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--dim);
+  font-size: 12px;
+  line-height: 1.7;
+  text-align: center;
+  padding: 32px;
+}
+
+.detail-empty .big { font-size: 28px; margin-bottom: 4px; }
+
+/* Skill content view */
+.skill-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.skill-frontmatter {
+  padding: 14px 20px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+  flex-shrink: 0;
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.fm-field { display: flex; flex-direction: column; gap: 2px; }
+.fm-key {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.fm-val { font-size: 12px; color: var(--text); }
+.fm-val.amber { color: var(--amber); }
+
+.skill-body {
+  flex: 1;
+  overflow: auto;
+  padding: 20px 24px;
+}
+.skill-body::-webkit-scrollbar { width: 4px; }
+.skill-body::-webkit-scrollbar-thumb { background: var(--border2); }
+
+.skill-content {
+  font-size: 12.5px;
+  line-height: 1.8;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--mono);
+}
+
+/* Markdown-ish rendering */
+.md-h1 { font-size: 16px; font-weight: 600; color: var(--amber); margin: 0 0 12px; font-family: var(--display); letter-spacing: 0.05em; }
+.md-h2 { font-size: 13px; font-weight: 600; color: var(--cyan); margin: 18px 0 8px; letter-spacing: 0.04em; text-transform: uppercase; font-size: 10.5px; }
+.md-h3 { font-size: 12.5px; font-weight: 500; color: var(--text); margin: 14px 0 6px; }
+.md-p  { margin: 0 0 10px; color: var(--text); }
+.md-li { padding: 2px 0 2px 16px; position: relative; color: var(--dim2); }
+.md-li::before { content: '·'; position: absolute; left: 4px; color: var(--amber); }
+.md-code {
+  display: block;
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-left: 2px solid var(--cyan-brd);
+  border-radius: 3px;
+  padding: 10px 14px;
+  margin: 8px 0;
+  font-size: 11.5px;
+  color: var(--text);
+  white-space: pre;
+  overflow-x: auto;
+}
+.md-inline-code {
+  background: var(--bg4);
+  border: 1px solid var(--border2);
+  border-radius: 2px;
+  padding: 1px 5px;
+  font-size: 11.5px;
+  color: var(--cyan);
+}
+.md-hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+.md-block { margin: 0 0 10px; }
+.md-yaml {
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: 3px;
+  padding: 10px 14px;
+  font-size: 11px;
+  color: var(--dim2);
+  margin-bottom: 16px;
+  display: none; /* hidden when frontmatter is shown in toolbar */
+}
+
+/* ── LOG PANEL ──────────────────────────────────── */
+.log-panel {
+  border-top: 1px solid var(--border);
+  background: var(--bg2);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: 200px;
+  transition: max-height 0.2s;
+}
+
+.log-panel.collapsed { max-height: 32px; overflow: hidden; }
+
+.log-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 14px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.log-header-label {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+  flex: 1;
+}
+
+.log-header-label.running { color: var(--amber); animation: pulse 1s infinite; }
+.log-header-label.done { color: var(--cyan); }
+.log-header-label.error { color: var(--red); }
+
+.log-toggle { font-size: 10px; color: var(--dim); }
+
+.log-body {
+  overflow-y: auto;
+  flex: 1;
+  padding: 6px 14px;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.log-body::-webkit-scrollbar { width: 3px; }
+.log-body::-webkit-scrollbar-thumb { background: var(--border2); }
+
+.log-line {
+  display: flex;
+  gap: 6px;
+  padding: 1px 0;
+  animation: rise 0.1s ease;
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.log-icon { flex-shrink: 0; color: var(--dim); }
+.log-text { color: var(--dim2); word-break: break-word; }
+.log-line.progress .log-icon { color: var(--blue); }
+.log-line.done .log-icon,.log-line.done .log-text { color: var(--cyan); }
+.log-line.error .log-icon,.log-line.error .log-text { color: var(--red); }
+.log-line.file_write .log-icon,.log-line.file_write .log-text { color: var(--amber); }
+.log-line.kept .log-text { color: var(--green); }
+.log-line.discarded .log-text { color: var(--dim); }
+
+/* ── CREATE/IMPROVE MODAL ───────────────────────── */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.72);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 100;
+  animation: rise 0.15s ease;
+  padding: 20px;
+}
+
+.modal {
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: 5px;
+  width: min(90vw, 560px);
+  display: flex; flex-direction: column;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.6);
+}
+
+.modal-header {
+  display: flex; align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg3);
+  flex-shrink: 0;
+  gap: 10px;
+}
+
+.modal-title {
+  flex: 1;
+  font-size: 12px; font-weight: 600;
+  color: var(--amber);
+  letter-spacing: 0.04em;
+}
+
+.modal-close {
+  background: none; border: none; color: var(--dim);
+  cursor: pointer; font-size: 15px; padding: 2px 6px;
+  border-radius: 2px; line-height: 1;
+  transition: color 0.1s, background 0.1s;
+}
+.modal-close:hover { color: var(--text); background: var(--bg4); }
+
+.modal-body { padding: 18px 18px 14px; display: flex; flex-direction: column; gap: 14px; }
+
+.field { display: flex; flex-direction: column; gap: 5px; }
+.field label {
+  font-size: 9.5px; font-weight: 600; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--dim);
+}
+
+.field input, .field textarea, .field select {
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  border-radius: 3px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  padding: 8px 10px;
+  outline: none;
+  transition: border-color 0.15s;
+  width: 100%;
+}
+.field input:focus, .field textarea:focus { border-color: var(--amber-brd); }
+.field input::placeholder, .field textarea::placeholder { color: var(--dim); }
+.field textarea { resize: vertical; min-height: 70px; line-height: 1.6; }
+
+.field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+.field-hint { font-size: 10.5px; color: var(--dim); margin-top: -2px; }
+
+.budget-row { display: flex; align-items: center; gap: 10px; }
+.budget-row input[type=range] {
+  flex: 1; padding: 0; background: none; border: none;
+  accent-color: var(--amber);
+}
+.budget-val {
+  font-size: 13px; font-weight: 600; color: var(--amber); min-width: 20px; text-align: center;
+}
+
+.modal-footer {
+  display: flex; justify-content: flex-end; gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+}
+
+.btn {
+  background: var(--bg3); border: 1px solid var(--border2);
+  border-radius: 3px; color: var(--dim2);
+  font-family: var(--mono); font-size: 11px;
+  padding: 7px 16px; cursor: pointer;
+  transition: color 0.1s, border-color 0.1s;
+  letter-spacing: 0.05em;
+}
+.btn:hover { color: var(--text); border-color: var(--amber-brd); }
+
+.btn.primary {
+  background: var(--amber); border-color: var(--amber); color: #000;
+  font-family: var(--display); font-weight: 800;
+  font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase;
+}
+.btn.primary:hover { background: #f0b042; border-color: #f0b042; }
+.btn.primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── CONFIRM DIALOG ─────────────────────────────── */
+.confirm-dialog {
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: 5px;
+  width: min(90vw, 400px);
+  box-shadow: 0 24px 60px rgba(0,0,0,0.6);
+  overflow: hidden;
+}
+
+.confirm-body { padding: 20px; color: var(--text); font-size: 12.5px; line-height: 1.7; }
+.confirm-body strong { color: var(--amber); }
+
+.confirm-footer {
+  display: flex; justify-content: flex-end; gap: 8px;
+  padding: 12px 18px; border-top: 1px solid var(--border);
+}
+
+.btn.danger { }
+.btn.danger:hover { color: var(--red); border-color: var(--red-brd); background: var(--red-lo); }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <header>
+    <div class="logo"><a href="agent-harness.html">agent</a><em>/skills</em></div>
+    <div class="header-sep"></div>
+    <button class="header-btn" id="refresh-btn" title="Re-load skills from disk">↻ refresh</button>
+    <button class="header-btn primary" id="new-skill-btn">+ new skill</button>
+    <button class="header-btn" id="theme-toggle">light</button>
+  </header>
+
+  <div class="config-bar">
+    <label>API key</label>
+    <input type="password" id="api-key" placeholder="sk-ant-… (required for create / RSI)" autocomplete="off" />
+    <span class="sep">│</span>
+    <label>RSI budget</label>
+    <input type="number" id="global-budget" value="3" min="1" max="20" style="width:52px;" />
+    <span class="status-text" id="global-status">ready</span>
+  </div>
+
+  <main>
+    <!-- LEFT: skill list -->
+    <div class="panel-left">
+      <div class="list-toolbar">
+        <input class="search-input" id="search" placeholder="filter skills…" autocomplete="off" />
+        <span class="skill-count" id="skill-count">0</span>
+      </div>
+      <div class="skill-list" id="skill-list">
+        <div class="skill-list-empty">Loading skills…</div>
+      </div>
+    </div>
+
+    <!-- RIGHT: detail -->
+    <div class="panel-right" id="panel-right">
+      <div class="detail-toolbar">
+        <div class="detail-title empty" id="detail-title">Select a skill to view</div>
+        <button class="tool-btn cyan" id="improve-btn" disabled title="Improve this skill via RSI">⬆ improve</button>
+        <button class="tool-btn danger" id="delete-btn" disabled title="Delete this skill">✕ delete</button>
+      </div>
+
+      <div class="detail-body" id="detail-body">
+        <div class="detail-empty">
+          <div class="big">⚡</div>
+          <div>Select a skill from the list<br>or create a new one.</div>
+        </div>
+      </div>
+
+      <div class="log-panel collapsed" id="log-panel">
+        <div class="log-header" id="log-toggle-btn">
+          <span class="log-header-label" id="log-label">Log</span>
+          <span class="log-toggle" id="log-toggle-icon">▲</span>
+        </div>
+        <div class="log-body" id="log-body"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Create/Improve Modal -->
+<div class="modal-overlay" id="skill-modal" style="display:none;">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="modal-title">New Skill</div>
+      <button class="modal-close" id="modal-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field-row">
+        <div class="field">
+          <label>Skill name</label>
+          <input type="text" id="modal-name" placeholder="e.g. summarizer" autocomplete="off" />
+          <div class="field-hint">slug, no spaces</div>
+        </div>
+        <div class="field">
+          <label>RSI budget</label>
+          <div class="budget-row">
+            <input type="range" id="modal-budget" min="1" max="10" value="3" />
+            <span class="budget-val" id="modal-budget-val">3</span>
+          </div>
+          <div class="field-hint">experiments to run</div>
+        </div>
+      </div>
+      <div class="field">
+        <label>Eval task</label>
+        <textarea id="modal-eval" placeholder="Describe the type of task this skill should help the agent accomplish…" rows="3"></textarea>
+        <div class="field-hint">What should the agent be able to do with this skill?</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" id="modal-cancel">Cancel</button>
+      <button class="btn primary" id="modal-run">Run RSI →</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { createVFS, execute, extractCode } from './src/agent-core.js';
+import { runTurn, buildSkillIndex } from './src/agent-loop.js';
+import { runSkillRSI } from './src/agent-rsi.js';
+import { getLLMClient } from './src/llm-client.js';
+
+// ════════════════════════════════════════════════════
+// THEME
+// ════════════════════════════════════════════════════
+
+const themeBtn = document.getElementById('theme-toggle');
+function applyTheme(light) {
+  document.documentElement.classList.toggle('light', light);
+  themeBtn.textContent = light ? 'dark' : 'light';
+  localStorage.setItem('aaron-theme', light ? 'light' : 'dark');
+}
+const savedTheme = localStorage.getItem('aaron-theme');
+const preferLight = savedTheme ? savedTheme === 'light' : window.matchMedia('(prefers-color-scheme: light)').matches;
+applyTheme(preferLight);
+themeBtn.addEventListener('click', () => applyTheme(!document.documentElement.classList.contains('light')));
+
+// ════════════════════════════════════════════════════
+// VFS + HYDRATION
+// ════════════════════════════════════════════════════
+
+const vfs = createVFS();
+
+async function hydrateSkills() {
+  // Always fetch harness sources for the agent to use
+  for (const f of ['agent-core.js', 'agent-loop.js']) {
+    try {
+      const content = await fetch(`src/${f}`).then(r => r.text());
+      vfs.write(`/harness/${f}`, content);
+      vfs.markClean(`/harness/${f}`);
+    } catch { /* skip */ }
+  }
+
+  // Load skills via manifest
+  try {
+    const manifest = await fetch('vfs-manifest.json').then(r => {
+      if (!r.ok) throw new Error('no manifest');
+      return r.json();
+    });
+    for (const f of (manifest.skills ?? [])) {
+      try {
+        const content = await fetch(`skills/${f}`).then(r => r.text());
+        vfs.write(`/skills/${f}`, content);
+        vfs.markClean(`/skills/${f}`);
+      } catch { /* skip */ }
+    }
+  } catch {
+    // No manifest: try to discover skills by listing the directory
+    try {
+      const listing = await fetch('skills/').then(r => r.text());
+      const dirs = [...listing.matchAll(/href="([^/."]+)\//g)].map(m => m[1]);
+      for (const dir of dirs) {
+        try {
+          const content = await fetch(`skills/${dir}/SKILL.md`).then(r => r.text());
+          vfs.write(`/skills/${dir}/SKILL.md`, content);
+          vfs.markClean(`/skills/${dir}/SKILL.md`);
+        } catch { /* skip */ }
+      }
+    } catch { /* no directory listing */ }
+  }
+}
+
+// ════════════════════════════════════════════════════
+// SKILL PARSING
+// ════════════════════════════════════════════════════
+
+function parseSkill(path, content) {
+  const name = path.split('/')[2] ?? path;
+  let description = '', frontmatter = {}, body = content;
+
+  // Parse YAML frontmatter
+  const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+  if (fmMatch) {
+    body = fmMatch[2];
+    for (const line of fmMatch[1].split('\n')) {
+      const colon = line.indexOf(':');
+      if (colon === -1) continue;
+      const key = line.slice(0, colon).trim();
+      const val = line.slice(colon + 1).trim().replace(/^['"]|['"]$/g, '');
+      frontmatter[key] = val;
+    }
+    description = frontmatter.description ?? '';
+  }
+
+  const lines = content.split('\n').length;
+  const bytes = new Blob([content]).size;
+
+  return { name: frontmatter.name ?? name, path, description, frontmatter, body, lines, bytes };
+}
+
+function getAllSkills() {
+  const paths = vfs.list().filter(p => p.startsWith('/skills/') && p.endsWith('/SKILL.md'));
+  return paths.map(p => parseSkill(p, vfs.read(p) ?? ''));
+}
+
+// ════════════════════════════════════════════════════
+// RENDER MARKDOWN (simple)
+// ════════════════════════════════════════════════════
+
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function renderMarkdown(md) {
+  const lines = md.split('\n');
+  let html = '';
+  let inCode = false;
+  let codeLines = [];
+  let inList = false;
+
+  const flushList = () => {
+    if (!inList) return;
+    inList = false;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    const line = raw;
+
+    if (line.startsWith('```')) {
+      if (!inCode) {
+        flushList();
+        inCode = true;
+        codeLines = [];
+      } else {
+        inCode = false;
+        html += `<pre class="md-code">${esc(codeLines.join('\n'))}</pre>`;
+        codeLines = [];
+      }
+      continue;
+    }
+
+    if (inCode) { codeLines.push(raw); continue; }
+
+    if (line.startsWith('# ')) {
+      flushList();
+      html += `<div class="md-h1">${esc(line.slice(2))}</div>`;
+    } else if (line.startsWith('## ')) {
+      flushList();
+      html += `<div class="md-h2">${esc(line.slice(3))}</div>`;
+    } else if (line.startsWith('### ')) {
+      flushList();
+      html += `<div class="md-h3">${esc(line.slice(4))}</div>`;
+    } else if (line.match(/^[-*] /)) {
+      inList = true;
+      const item = line.slice(2);
+      html += `<div class="md-li">${renderInline(item)}</div>`;
+    } else if (line.match(/^\d+\. /)) {
+      inList = true;
+      const item = line.replace(/^\d+\. /, '');
+      html += `<div class="md-li">${renderInline(item)}</div>`;
+    } else if (line === '---') {
+      flushList();
+      html += `<hr class="md-hr">`;
+    } else if (line.trim() === '') {
+      flushList();
+      html += `<div style="height:6px;"></div>`;
+    } else {
+      flushList();
+      html += `<div class="md-p">${renderInline(line)}</div>`;
+    }
+  }
+  return html;
+}
+
+function renderInline(text) {
+  return esc(text).replace(/`([^`]+)`/g, '<span class="md-inline-code">$1</span>');
+}
+
+// ════════════════════════════════════════════════════
+// UI STATE
+// ════════════════════════════════════════════════════
+
+let allSkills = [];
+let selectedSkill = null;
+let searchQuery = '';
+
+const skillListEl   = document.getElementById('skill-list');
+const skillCountEl  = document.getElementById('skill-count');
+const searchEl      = document.getElementById('search');
+const detailTitleEl = document.getElementById('detail-title');
+const detailBodyEl  = document.getElementById('detail-body');
+const improveBtn    = document.getElementById('improve-btn');
+const deleteBtn     = document.getElementById('delete-btn');
+const globalStatus  = document.getElementById('global-status');
+const apiKeyEl      = document.getElementById('api-key');
+const globalBudget  = document.getElementById('global-budget');
+
+// Restore saved API key
+const savedKey = localStorage.getItem('ANTHROPIC_API_KEY') || localStorage.getItem('aaron-apikey') || '';
+if (savedKey) apiKeyEl.value = savedKey;
+apiKeyEl.addEventListener('change', () => {
+  const k = apiKeyEl.value.trim();
+  if (k) localStorage.setItem('ANTHROPIC_API_KEY', k);
+});
+
+// ── Render skill list ─────────────────────────────
+function renderList() {
+  const q = searchQuery.toLowerCase();
+  const visible = allSkills.filter(s =>
+    !q || s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q)
+  );
+
+  skillCountEl.textContent = visible.length;
+
+  if (visible.length === 0) {
+    skillListEl.innerHTML = allSkills.length === 0
+      ? `<div class="skill-list-empty">No skills found.<br><br>Click <strong>+ new skill</strong> to create one via RSI.</div>`
+      : `<div class="skill-list-empty">No skills match "<em>${esc(searchQuery)}</em>".</div>`;
+    return;
+  }
+
+  skillListEl.innerHTML = visible.map(s => `
+    <div class="skill-card${selectedSkill?.path === s.path ? ' active' : ''}" data-path="${esc(s.path)}">
+      <div class="skill-card-name">${esc(s.name)}</div>
+      ${s.description ? `<div class="skill-card-desc">${esc(s.description)}</div>` : ''}
+      <div class="skill-card-meta">
+        <span class="skill-tag">skill</span>
+        <span class="skill-size">${s.lines} lines · ${(s.bytes / 1024).toFixed(1)}kb</span>
+      </div>
+    </div>
+  `).join('');
+
+  skillListEl.querySelectorAll('.skill-card').forEach(el => {
+    el.addEventListener('click', () => {
+      const skill = allSkills.find(s => s.path === el.dataset.path);
+      if (skill) selectSkill(skill);
+    });
+  });
+}
+
+// ── Render skill detail ───────────────────────────
+function selectSkill(skill) {
+  selectedSkill = skill;
+  renderList();
+
+  detailTitleEl.textContent = skill.name;
+  detailTitleEl.classList.remove('empty');
+  improveBtn.disabled = false;
+  deleteBtn.disabled = false;
+
+  const fmEntries = Object.entries(skill.frontmatter)
+    .map(([k, v]) => `<div class="fm-field">
+        <div class="fm-key">${esc(k)}</div>
+        <div class="fm-val${k === 'name' ? ' amber' : ''}">${esc(v)}</div>
+      </div>`).join('');
+
+  detailBodyEl.innerHTML = `
+    <div class="skill-view">
+      ${fmEntries ? `<div class="skill-frontmatter">${fmEntries}</div>` : ''}
+      <div class="skill-body">
+        <div class="skill-content">${renderMarkdown(skill.body)}</div>
+      </div>
+    </div>`;
+}
+
+// ── Search ────────────────────────────────────────
+searchEl.addEventListener('input', () => {
+  searchQuery = searchEl.value;
+  renderList();
+});
+
+// ── Refresh ───────────────────────────────────────
+document.getElementById('refresh-btn').addEventListener('click', async () => {
+  globalStatus.textContent = 'refreshing…';
+  globalStatus.className = 'status-text running';
+  await hydrateSkills();
+  allSkills = getAllSkills();
+  renderList();
+  if (selectedSkill) {
+    const updated = allSkills.find(s => s.path === selectedSkill.path);
+    if (updated) selectSkill(updated);
+  }
+  globalStatus.textContent = `${allSkills.length} skill(s) loaded`;
+  globalStatus.className = 'status-text ok';
+  setTimeout(() => { globalStatus.textContent = 'ready'; globalStatus.className = 'status-text'; }, 2500);
+});
+
+// ════════════════════════════════════════════════════
+// LOG PANEL
+// ════════════════════════════════════════════════════
+
+const logPanel   = document.getElementById('log-panel');
+const logLabel   = document.getElementById('log-label');
+const logBody    = document.getElementById('log-body');
+const logToggle  = document.getElementById('log-toggle-btn');
+const logIcon    = document.getElementById('log-toggle-icon');
+
+logToggle.addEventListener('click', () => {
+  logPanel.classList.toggle('collapsed');
+  logIcon.textContent = logPanel.classList.contains('collapsed') ? '▲' : '▼';
+});
+
+const EV_ICONS = { progress:'◆', result:'→', file_write:'✦', file_read:'◇', done:'✓', error:'✕', metric:'▪', experiment:'◉' };
+
+function logClear() {
+  logBody.innerHTML = '';
+  logPanel.classList.remove('collapsed');
+  logIcon.textContent = '▼';
+}
+
+function logLine(ev) {
+  const icon = EV_ICONS[ev.type] ?? '·';
+  let text = '';
+  let cls  = ev.type;
+
+  switch (ev.type) {
+    case 'progress':   text = ev.message ?? ''; break;
+    case 'file_write': text = `wrote ${ev.path}`; break;
+    case 'done':       text = ev.message ?? 'done'; break;
+    case 'error':      text = ev.message ?? 'error'; break;
+    case 'metric':     text = `${ev.name}: ${ev.value} ${ev.unit ?? ''}`; break;
+    case 'experiment':
+      cls  = ev.kept ? 'kept' : 'discarded';
+      text = `${ev.kept ? '✓ kept' : '✗ discarded'}: ${ev.reason ?? ''}`;
+      break;
+    default: text = JSON.stringify(ev);
+  }
+
+  const el = document.createElement('div');
+  el.className = `log-line ${cls}`;
+  el.innerHTML = `<span class="log-icon">${icon}</span><span class="log-text">${esc(text)}</span>`;
+  logBody.appendChild(el);
+  logBody.scrollTop = logBody.scrollHeight;
+}
+
+function setLogStatus(s) {
+  logLabel.textContent = s === 'running' ? 'Running RSI…' : s === 'done' ? 'Done' : s === 'error' ? 'Error' : 'Log';
+  logLabel.className = `log-header-label ${s}`;
+}
+
+// ════════════════════════════════════════════════════
+// AGENT SETUP
+// ════════════════════════════════════════════════════
+
+function makeContext() {
+  const ctx = {
+    vfs,
+    fetch: (...a) => fetch(...a),
+    emit: (ev) => logLine(ev),
+    env: {},
+    skillIndex: buildSkillIndex(vfs),
+    async commit() { return []; },
+  };
+  return ctx;
+}
+
+function makeState() {
+  return { history: [], turn: 0, context: makeContext() };
+}
+
+// ════════════════════════════════════════════════════
+// RSI RUNNER
+// ════════════════════════════════════════════════════
+
+let rsiRunning = false;
+
+async function runRSI({ skillName, evalTask, budget, isCreate }) {
+  if (rsiRunning) return;
+
+  const apiKey = apiKeyEl.value.trim();
+  if (!apiKey) {
+    alert('Enter your Anthropic API key in the config bar first.');
+    return;
+  }
+  localStorage.setItem('ANTHROPIC_API_KEY', apiKey);
+
+  rsiRunning = true;
+  globalStatus.textContent = `RSI running (${skillName})…`;
+  globalStatus.className = 'status-text running';
+  setLogStatus('running');
+  logClear();
+  setButtonsDisabled(true);
+
+  const state = makeState();
+  const deps  = { execute, extractCode, runTurn,
+    ui: {
+      setStatus() {}, showCode() {}, emitEvent(ev) { logLine(ev); },
+      onRetry(a, m) { logLine({ type: 'progress', message: `retry ${a}/${m}` }); },
+      onTurnComplete() {},
+    }
+  };
+
+  const skillPath = `/skills/${skillName}/SKILL.md`;
+  const existing  = vfs.read(skillPath);
+
+  const mutatePrompt = existing
+    ? [
+        `Read /skills/${skillName}/SKILL.md — this is a skill that provides instructions for the agent.`,
+        `Now analyze how an agent would approach this eval task: "${evalTask}"`,
+        `Improve the skill instructions to help the agent complete this type of task more reliably.`,
+        `Keep the YAML frontmatter (name, description) and agentskills.io format.`,
+        `Write the improved version back to /skills/${skillName}/SKILL.md.`,
+        'Explain what you changed and why in a progress emit before the done emit.',
+      ].join('\n')
+    : [
+        `Create a new skill at /skills/${skillName}/SKILL.md that would help the agent with this type of task: "${evalTask}"`,
+        'Follow the agentskills.io SKILL.md format:',
+        '  - YAML frontmatter with name and description (---\\nname: ...\\ndescription: ...\\n---)',
+        '  - Markdown body with approach, templates, checklists',
+        `  - name in frontmatter must be: ${skillName}`,
+        'Write the file, then explain what you created in a progress emit before the done emit.',
+      ].join('\n');
+
+  try {
+    const results = await runSkillRSI({
+      evalPrompt: evalTask,
+      skillName,
+      mutatePrompt,
+      budget,
+      state,
+      deps,
+      log: (msg) => logLine({ type: 'progress', message: msg }),
+    });
+
+    const kept = results.filter(r => r.kept).length;
+    logLine({ type: 'done', message: `RSI complete: ${kept}/${results.length} experiments kept` });
+    setLogStatus('done');
+
+    // Reload the skill from VFS and update view
+    allSkills = getAllSkills();
+    renderList();
+    const updated = allSkills.find(s => s.path === skillPath);
+    if (updated) selectSkill(updated);
+
+    globalStatus.textContent = `RSI done — ${kept}/${results.length} kept`;
+    globalStatus.className = 'status-text ok';
+    setTimeout(() => { globalStatus.textContent = 'ready'; globalStatus.className = 'status-text'; }, 4000);
+
+  } catch (e) {
+    logLine({ type: 'error', message: e.message });
+    setLogStatus('error');
+    globalStatus.textContent = `error: ${e.message.slice(0, 60)}`;
+    globalStatus.className = 'status-text error';
+  } finally {
+    rsiRunning = false;
+    setButtonsDisabled(false);
+  }
+}
+
+function setButtonsDisabled(disabled) {
+  improveBtn.disabled = disabled || !selectedSkill;
+  deleteBtn.disabled  = disabled || !selectedSkill;
+  document.getElementById('new-skill-btn').disabled = disabled;
+  document.getElementById('modal-run').disabled = disabled;
+}
+
+// ════════════════════════════════════════════════════
+// IMPROVE BUTTON
+// ════════════════════════════════════════════════════
+
+improveBtn.addEventListener('click', () => {
+  if (!selectedSkill) return;
+  openModal('improve', selectedSkill.name);
+});
+
+// ════════════════════════════════════════════════════
+// DELETE
+// ════════════════════════════════════════════════════
+
+deleteBtn.addEventListener('click', () => {
+  if (!selectedSkill) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="confirm-dialog">
+      <div class="confirm-body">
+        Delete skill <strong>${esc(selectedSkill.name)}</strong>?<br>
+        <span style="color:var(--dim);font-size:11px;">This removes it from the VFS. The file on disk is unaffected until you refresh.</span>
+      </div>
+      <div class="confirm-footer">
+        <button class="btn" id="confirm-cancel">Cancel</button>
+        <button class="btn danger" id="confirm-ok">Delete</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#confirm-cancel').onclick = () => overlay.remove();
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  overlay.querySelector('#confirm-ok').onclick = () => {
+    overlay.remove();
+    vfs.write(selectedSkill.path, null); // clear from VFS
+    // Also try to purge sub-files
+    const dir = selectedSkill.path.replace('/SKILL.md', '/');
+    vfs.list().filter(p => p.startsWith(dir)).forEach(p => vfs.write(p, null));
+    allSkills = getAllSkills();
+    selectedSkill = null;
+    detailTitleEl.textContent = 'Select a skill to view';
+    detailTitleEl.classList.add('empty');
+    detailBodyEl.innerHTML = `<div class="detail-empty"><div class="big">⚡</div><div>Select a skill from the list<br>or create a new one.</div></div>`;
+    improveBtn.disabled = true;
+    deleteBtn.disabled  = true;
+    renderList();
+  };
+});
+
+// ════════════════════════════════════════════════════
+// CREATE / IMPROVE MODAL
+// ════════════════════════════════════════════════════
+
+let modalMode = 'create';
+let modalPresetName = '';
+
+const modal       = document.getElementById('skill-modal');
+const modalTitle  = document.getElementById('modal-title');
+const modalName   = document.getElementById('modal-name');
+const modalEval   = document.getElementById('modal-eval');
+const modalBudget = document.getElementById('modal-budget');
+const modalBudgetVal = document.getElementById('modal-budget-val');
+const modalRunBtn = document.getElementById('modal-run');
+
+modalBudget.addEventListener('input', () => { modalBudgetVal.textContent = modalBudget.value; });
+
+function openModal(mode, presetName = '') {
+  modalMode = mode;
+  modalPresetName = presetName;
+
+  if (mode === 'improve') {
+    modalTitle.textContent = `Improve: ${presetName}`;
+    modalName.value = presetName;
+    modalName.disabled = true;
+    modalEval.value = '';
+    modalEval.placeholder = 'Describe the task you want this skill to handle better…';
+    modalRunBtn.textContent = 'Improve →';
+  } else {
+    modalTitle.textContent = 'New Skill';
+    modalName.value = '';
+    modalName.disabled = false;
+    modalEval.value = '';
+    modalEval.placeholder = 'Describe the type of task this skill should help the agent accomplish…';
+    modalRunBtn.textContent = 'Create via RSI →';
+  }
+
+  modal.style.display = 'flex';
+  setTimeout(() => (modalMode === 'create' ? modalName : modalEval).focus(), 50);
+}
+
+function closeModal() {
+  modal.style.display = 'none';
+}
+
+document.getElementById('new-skill-btn').addEventListener('click', () => openModal('create'));
+document.getElementById('modal-close').addEventListener('click', closeModal);
+document.getElementById('modal-cancel').addEventListener('click', closeModal);
+modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+modalRunBtn.addEventListener('click', async () => {
+  const name     = modalName.value.trim().replace(/[^a-zA-Z0-9_-]/g, '-');
+  const evalTask = modalEval.value.trim();
+  const budget   = parseInt(modalBudget.value, 10) || 3;
+
+  if (!name) { modalName.focus(); return; }
+  if (!evalTask) { modalEval.focus(); return; }
+
+  closeModal();
+  await runRSI({ skillName: name, evalTask, budget, isCreate: modalMode === 'create' });
+});
+
+// Sync global budget → modal budget
+globalBudget.addEventListener('change', () => {
+  const v = Math.max(1, Math.min(20, parseInt(globalBudget.value, 10) || 3));
+  modalBudget.value = Math.min(v, 10);
+  modalBudgetVal.textContent = modalBudget.value;
+});
+
+// ════════════════════════════════════════════════════
+// INIT
+// ════════════════════════════════════════════════════
+
+async function init() {
+  globalStatus.textContent = 'loading skills…';
+  globalStatus.className = 'status-text running';
+  await hydrateSkills();
+  allSkills = getAllSkills();
+  renderList();
+  globalStatus.textContent = `${allSkills.length} skill(s) loaded`;
+  globalStatus.className = 'status-text ok';
+  setTimeout(() => { globalStatus.textContent = 'ready'; globalStatus.className = 'status-text'; }, 2000);
+}
+
+init();
+</script>
+</body>
+</html>
