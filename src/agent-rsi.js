@@ -19,7 +19,8 @@
 
 import { buildSkillIndex } from './agent-loop.js';
 import { createGitHubClient, commitToGitHub } from './github.js';
-import vm from 'node:vm';
+
+const isNode = typeof process !== 'undefined' && !!process.versions?.node;
 
 // ════════════════════════════════════════════════════
 // EVAL RUNNER
@@ -149,11 +150,15 @@ function validateContract(source) {
   }
 
   // 8. Syntax check — catches unescaped backticks, stray tokens, etc.
-  try {
-    new vm.Script(source);
-  } catch (e) {
-    if (e instanceof SyntaxError) {
-      violations.push(`Syntax error: ${e.message}`);
+  // Browser-safe: avoid importing Node-only modules in web runtime.
+  if (isNode) {
+    try {
+      const syntaxProbe = source.replace(/^\s*export\s+/gm, '');
+      new Function(syntaxProbe);
+    } catch (e) {
+      if (e instanceof SyntaxError) {
+        violations.push(`Syntax error: ${e.message}`);
+      }
     }
   }
 

@@ -3,7 +3,7 @@
 **Status:** Living Document  
 **Date:** 2026-03-21  
 **Authors:** Weo + Claude  
-**Revision:** 2
+**Revision:** 3
 
 ---
 
@@ -408,22 +408,239 @@ The `:skill` command supports both improving existing skills and creating new on
 
 ---
 
+## Decision 14: Workspace Model (Two-Layer VFS)
+
+### Status: proposed
+
+### Context
+
+Aaron's VFS conflates two concerns: the **agent's own state** (skills, harness, core workflows) and the **working state** for a specific repo (source files, memory, scratch, artifacts). When Aaron switches between repos — or between its own repo and an external project — everything in the flat VFS gets clobbered. This blocks the multi-repo pivot where Aaron can work on any GitHub repo while continuing to improve itself.
+
+### Decision
+
+Split the VFS into two conceptual layers:
+
+| Layer | VFS paths | Lifetime |
+|-------|-----------|----------|
+| **Agent layer** | `/harness/`, `/skills/`, `/workflows/` (general) | Persistent, global, shared across all repos |
+| **Workspace layer** | `/src/`, `/memory/`, `/scratch/`, `/artifacts/`, `/project-skills/`, `/project-workflows/` | Per-repo, swappable |
+
+A **workspace** is a named bundle representing everything about a particular repo engagement:
+
+```javascript
+workspace = {
+  id: 'weolopez/some-project@main',   // derived from owner/repo@ref
+  src: { /* VFS snapshot of /src/ */ },
+  memory: { /* VFS snapshot of /memory/ */ },
+  scratch: { /* VFS snapshot of /scratch/ */ },
+  artifacts: { /* VFS snapshot of /artifacts/ */ },
+  projectSkills: { /* VFS snapshot of /project-skills/ */ },
+  projectWorkflows: { /* VFS snapshot of /project-workflows/ */ },
+  history: [],                          // conversation history for this workspace
+  turn: 0,
+  github: { owner, repo, ref },        // commit target
+}
+```
+
+### Workspace operations
+
+```javascript
+// New module: src/workspace.js
+createWorkspace(id)                    // → fresh workspace bundle
+snapshotWorkspace(vfs)                 // → extract workspace-layer paths into bundle
+restoreWorkspace(vfs, bundle)          // → clear workspace-layer paths, load bundle
+getWorkspaceId(owner, repo, ref)       // → stable ID string
+```
+
+### Context switching
+
+Switching repos:
+1. `snapshotWorkspace(vfs)` → save current workspace layer
+2. Persist snapshot to storage (disk / localStorage)
+3. `restoreWorkspace(vfs, targetBundle)` → load target workspace layer
+4. Rebuild skill index (core + project skills)
+5. Update `context.github` to point at new repo
+6. Resume with target workspace's conversation history
+
+The agent layer (`/harness/`, `/skills/`, `/workflows/`) is **never touched** by workspace switching.
+
+### Isomorphic persistence
+
+| Platform | Storage backend | Location |
+|----------|----------------|----------|
+| CLI / Node | Disk | `~/.aaron/workspaces/{id}/` |
+| Browser | localStorage / IndexedDB | Key: `aaron-workspace-{id}` |
+
+Session persistence (`session.js`) becomes workspace-aware: session key is the workspace ID, not a global singleton.
+
+### Special workspace: `self`
+
+Aaron's own repo (`weolopez/aaron@main`) is just another workspace with `id: 'self'`. When working on itself, Aaron uses the same workspace machinery — the only difference is that the agent layer files (`/harness/`, `/skills/`) overlap with the working codebase. RSI on `self` can modify both layers.
+
+### Rationale
+- Minimal change: VFS API is unchanged, path conventions are unchanged
+- All existing skills, workflows, RSI — they all work against VFS paths and are workspace-agnostic by design
+- The workspace layer is just a save/restore of VFS prefixes — same `snapshot()`/`restore()` primitives already in `agent-core.js`
+- Isomorphic: workspace bundles are plain JSON objects, serializable everywhere
+
+---
+
+## Decision 15: `.aaron/` Convention for External Repos
+
+### Status: proposed
+
+### Context
+
+When Aaron works on an external repo, it needs a place to store project-specific skills, workflows, memory, and configuration. These should live *in the target repo* so they're version-controlled, shareable, and available on re-hydration.
+
+### Decision
+
+External repos may contain a `.aaron/` directory at their root:
+
+```
+target-repo/
+├── .aaron/
+│   ├── skills/              # project-specific skills
+│   │   └── django-migration/
+│   │       └── SKILL.md
+│   ├── workflows/           # project-specific workflows
+│   │   └── deploy-check.json
+│   ├── memory/              # repo-specific facts and learnings
+│   │   └── architecture.md
+│   └── config.json          # repo-level Aaron configuration
+├── src/
+├── package.json
+└── ...
+```
+
+### Discovery
+
+During `initFromGitHub`, after hydrating `/src/`, Aaron checks for `.aaron/` in the repo tree:
+
+1. Files under `.aaron/skills/` → mounted at `/project-skills/` in VFS
+2. Files under `.aaron/workflows/` → mounted at `/project-workflows/` in VFS
+3. Files under `.aaron/memory/` → mounted at `/memory/` in VFS (project memory merges with workspace memory)
+4. `.aaron/config.json` → loaded into `context.env.projectConfig`
+
+### `config.json` schema
+
+```json
+{
+  "include": ["src/", "lib/"],
+  "exclude": ["node_modules/", "dist/", ".git/"],
+  "defaultWorkflow": "deploy-check",
+  "language": "typescript",
+  "conventions": {
+    "testDir": "__tests__/",
+    "componentDir": "src/components/"
+  }
+}
+```
+
+### Commit-back
+
+When `context.commit()` is called, dirty files under `/project-skills/` and `/project-workflows/` are mapped back to `.aaron/skills/` and `.aaron/workflows/` in the target repo and pushed alongside `/src/` changes.
+
+### No `.aaron/` is fine
+
+If a repo has no `.aaron/` directory, Aaron works with core skills only. The directory is created organically when Aaron creates a project-specific skill or workflow.
+
+### Rationale
+- Follows established conventions (`.github/`, `.vscode/`, `.eslintrc`)
+- Version-controlled: project skills improve over time and are shared across contributors
+- Discoverable: Aaron auto-detects on hydration, no manual configuration needed
+- Composable: project skills extend (not replace) core skills
+
+---
+
+## Decision 16: Skill & Workflow Scoping
+
+### Status: proposed
+
+### Context
+
+With Aaron working on multiple repos, skills and workflows exist at two scopes. We need clear rules for how they interact — especially for name collisions, RSI boundaries, and promotion.
+
+### Decision
+
+Two scopes:
+
+| Scope | VFS path | Source | RSI target |
+|-------|----------|--------|------------|
+| **Core** | `/skills/`, `/workflows/` | Aaron's own repo | Only via self-workspace RSI |
+| **Project** | `/project-skills/`, `/project-workflows/` | `.aaron/` in target repo | Project-scoped RSI |
+
+### Skill merging
+
+`buildSkillIndex` scans both `/skills/` and `/project-skills/`. The merged index is injected into the SYSTEM prompt.
+
+**Precedence on name collision:** project skill wins. If both core and project define a `code-review` skill, the project version is used. This allows repos to override Aaron's defaults with domain-specific instructions.
+
+```javascript
+// Extended buildSkillIndex(vfs)
+// 1. Scan /skills/*/SKILL.md → core skills
+// 2. Scan /project-skills/*/SKILL.md → project skills
+// 3. Merge: project overrides core on name collision
+// 4. Return combined index string
+```
+
+### Workflow scoping
+
+Workflows follow the same pattern:
+- `/workflows/*.json` — core workflows (general-purpose)
+- `/project-workflows/*.json` — project workflows
+
+The `:workflow` / `aaron workflow` commands search both paths. Project workflows are listed first.
+
+### RSI scope boundary
+
+**Critical rule:** When running RSI on an external repo, only `/project-skills/` and `/project-workflows/` may be mutated. Core skills/workflows are immutable in that context.
+
+This prevents a bad repo from degrading Aaron's core intelligence. Core improvements happen only when Aaron is in its `self` workspace.
+
+| Workspace | `:rsi` target | `:skill` target | `:workflow rsi` target |
+|-----------|--------------|-----------------|----------------------|
+| `self` | `/harness/*` | `/skills/*` | `/workflows/*` |
+| External | blocked | `/project-skills/*` | `/project-workflows/*` |
+
+### Promotion
+
+A project skill that proves valuable can be promoted to core:
+
+```
+aaron skill promote <name>
+```
+
+This copies `/project-skills/<name>/` → `/skills/<name>/` in Aaron's own repo and commits. The project skill remains in place (now shadowed by the identical core version).
+
+### Rationale
+- Clear separation prevents cross-contamination between repos
+- Project skills can specialize without risk to core
+- Promotion provides a deliberate path from project → core
+- The RSI boundary is the key safety property: external repos cannot degrade Aaron
+
+---
+
 ## Open Questions
 
 | #  | Question | Notes |
 |----|----------|-------|
 | 1  | **Flush policy** | `context.commit()` preferred for RSI |
-| 2  | **VFS size limits** | Lazy loading for large repos |
+| 2  | **VFS size limits** | Lazy loading for large repos; repo summarizer skill for context budget |
 | 3  | **Conflict resolution** | SHA divergence mid-session |
 | 4  | **SES vs iframe** | Browser sandboxing — deferred |
 | 5  | **Package allowlist** | `/config/allowed-packages.json` in VFS |
 | 6  | **Testing integration** | Vitest runs isomorphically; needs emit integration |
-| 7  | **Session identity** | GitHub branch per RSI experiment session |
+| 7  | **Session identity** | Resolved by Decision 14 — session keyed by workspace ID |
 | 8  | **Multi-agent** | SHA-per-file gives optimistic concurrency almost for free |
 | 9  | **RSI metric weighting** | Single metric vs composite score |
 | 10 | **RSI budget** | How many autonomous iterations before human review? |
 | 11 | **program.md format** | Structured vs freeform |
-| 12 | **Unified codebase** | When to extract `agent-core.js` from the two harnesses |
+| 12 | **Unified codebase** | Resolved — `agent-core.js` extracted (Decision 12) |
+| 13 | **Workspace persistence format** | JSON snapshot vs delta-based? Large repos may need compression |
+| 14 | **Context budget for large repos** | Repo summarizer skill? Selective file loading via `.aaron/config.json` include/exclude? |
+| 15 | **Multi-repo simultaneous** | Can Aaron hydrate two repos into different VFS prefixes in one session? Deferred — single active workspace for now |
+| 16 | **Skill promotion UX** | Automatic suggestion when a project skill is reused across N repos? Manual-only for now |
 
 ---
 
@@ -444,3 +661,6 @@ The `:skill` command supports both improving existing skills and creating new on
 | 11 | RSI | autoresearch pattern; agent on `/harness/`, human on `/program.md` |
 | 12 | Harness | Browser + CLI; identical core, swappable UI |
 | 13 | Agent Skills | agentskills.io standard; progressive disclosure via VFS |
+| 14 | Workspace Model | Two-layer VFS; agent layer (global) + workspace layer (per-repo, swappable) |
+| 15 | `.aaron/` Convention | Project-specific skills/workflows/memory in target repo's `.aaron/` dir |
+| 16 | Skill & Workflow Scoping | Core vs project scope; project wins on collision; RSI boundary enforced |
