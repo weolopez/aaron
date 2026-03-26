@@ -198,9 +198,10 @@ console.log('\ninitFromGitHub:');
       method: 'GET',
       pattern: '/contents/',
       body: (url) => {
-        // Extract path from URL
+        // Extract path from URL — match per-segment encoded or full-encoded paths
         for (const [path, content] of Object.entries(fileContents)) {
-          if (url.includes(encodeURIComponent(path))) {
+          const perSegment = path.split('/').map(encodeURIComponent).join('/');
+          if (url.includes(perSegment) || url.includes(encodeURIComponent(path))) {
             return {
               content: Buffer.from(content).toString('base64'),
               sha: 'sha-' + path,

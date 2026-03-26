@@ -79,7 +79,8 @@ export function createGitHubClient({ token, fetch: fetchFn = fetch }) {
      */
     async getFile(owner, repo, path, ref) {
       const query = ref ? `?ref=${encodeURIComponent(ref)}` : '';
-      const data = await request('GET', `/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}${query}`);
+      const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+      const data = await request('GET', `/repos/${owner}/${repo}/contents/${encodedPath}${query}`);
       if (!data) return null;
       // Content is base64 encoded
       const content = typeof atob === 'function'
@@ -102,8 +103,9 @@ export function createGitHubClient({ token, fetch: fetchFn = fetch }) {
       };
       if (sha) body.sha = sha;
       if (branch) body.branch = branch;
-      const data = await request('PUT', `/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`, body);
-      return { sha: data.content.sha };
+      const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+      const data = await request('PUT', `/repos/${owner}/${repo}/contents/${encodedPath}`, body);
+      return { sha: data?.content?.sha ?? null };
     },
 
     /**
@@ -113,14 +115,16 @@ export function createGitHubClient({ token, fetch: fetchFn = fetch }) {
     async deleteFile(owner, repo, path, sha, message, branch) {
       const body = { message, sha };
       if (branch) body.branch = branch;
-      await request('DELETE', `/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`, body);
+      const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+      await request('DELETE', `/repos/${owner}/${repo}/contents/${encodedPath}`, body);
     },
 
     /**
      * Get a branch ref. Returns { sha } or null.
      */
     async getBranch(owner, repo, branch) {
-      const data = await request('GET', `/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(branch)}`);
+      const encodedBranch = branch.split('/').map(encodeURIComponent).join('/');
+      const data = await request('GET', `/repos/${owner}/${repo}/git/ref/heads/${encodedBranch}`);
       if (!data) return null;
       return { sha: data.object.sha };
     },
@@ -133,6 +137,76 @@ export function createGitHubClient({ token, fetch: fetchFn = fetch }) {
         ref: `refs/heads/${branchName}`,
         sha: fromSha,
       });
+    },
+
+    /**
+     * Create a pull request.
+     * @returns {{ number, html_url, title }} or throws
+     */
+    async createPR(owner, repo, { title, body, head, base = 'main' }) {
+      const data = await request('POST', `/repos/${owner}/${repo}/pulls`, {
+        title, body, head, base,
+      });
+      if (!data) {
+        throw new Error(`Failed to create PR (404): head=${head}, base=${base} — branch may not exist or token lacks permissions`);
+      }
+      return { number: data.number, html_url: data.html_url, title: data.title };
+    },
+
+    /**
+     * List open pull requests.
+     * @returns {Array<{ number, title, head, base, html_url }>}
+     */
+    async listPRs(owner, repo, state = 'open') {
+      const data = await request('GET', `/repos/${owner}/${repo}/pulls?state=${state}&per_page=30`);
+      if (!data) return [];
+      return data.map(pr => ({
+        number: pr.number,
+        title: pr.title,
+        head: pr.head.ref,
+        base: pr.base.ref,
+        html_url: pr.html_url,
+        state: pr.state,
+        mergeable: pr.mergeable,
+      }));
+    },
+
+    /**
+     * Merge a pull request.
+     * @returns {{ sha, merged }} or throws
+     */
+    async mergePR(owner, repo, prNumber, { merge_method = 'merge', commit_title } = {}) {
+      const body = { merge_method };
+      if (commit_title) body.commit_title = commit_title;
+      const data = await request('PUT', `/repos/${owner}/${repo}/pulls/${prNumber}/merge`, body);
+      return { sha: data.sha, merged: data.merged };
+    },
+
+    /**
+     * Get a single pull request by number.
+     * @returns {{ number, title, state, mergeable, head, base, html_url }}
+     */
+    async getPR(owner, repo, prNumber) {
+      const data = await request('GET', `/repos/${owner}/${repo}/pulls/${prNumber}`);
+      if (!data) return null;
+      return {
+        number: data.number,
+        title: data.title,
+        state: data.state,
+        mergeable: data.mergeable,
+        head: data.head.ref,
+        base: data.base.ref,
+        html_url: data.html_url,
+        body: data.body,
+      };
+    },
+
+    /**
+     * Delete a branch.
+     */
+    async deleteBranch(owner, repo, branchName) {
+      const encodedBranch = branchName.split('/').map(encodeURIComponent).join('/');
+      await request('DELETE', `/repos/${owner}/${repo}/git/refs/heads/${encodedBranch}`);
     },
   };
 }
@@ -205,7 +279,55 @@ export async function initFromGitHub(config, vfs, client, emit) {
   }
 
   emit?.({ type: 'progress', message: `Hydrated ${count} files from ${owner}/${repo}@${ref}` });
-  return { files: count, skipped };
+
+  // ════════════════════════════════════════════════════
+  // .aaron/ Discovery (ADR.md Decision 15)
+  // ════════════════════════════════════════════════════
+
+  const aaronFiles = tree.filter(f => f.path.startsWith('.aaron/'));
+  if (aaronFiles.length > 0) {
+    emit?.({ type: 'progress', message: `Found ${aaronFiles.length} .aaron/ file(s), mounting...` });
+
+    let aaronMounted = 0;
+    for (const f of aaronFiles) {
+      try {
+        const result = await client.getFile(owner, repo, f.path, ref);
+        if (!result) continue;
+
+        const relPath = f.path.slice('.aaron/'.length); // Remove .aaron/ prefix
+
+        if (relPath.startsWith('skills/')) {
+          // Mount project skills to /project-skills/
+          const destPath = '/project-skills/' + relPath.slice('skills/'.length);
+          vfs.write(destPath, result.content);
+          vfs.setSHA(destPath, result.sha);
+          vfs.markClean(destPath);
+          aaronMounted++;
+        } else if (relPath.startsWith('workflows/')) {
+          // Mount project workflows to /project-workflows/
+          const destPath = '/project-workflows/' + relPath.slice('workflows/'.length);
+          vfs.write(destPath, result.content);
+          vfs.setSHA(destPath, result.sha);
+          vfs.markClean(destPath);
+          aaronMounted++;
+        } else if (relPath.startsWith('memory/')) {
+          // Merge project memory into /memory/
+          const destPath = '/memory/' + relPath.slice('memory/'.length);
+          vfs.write(destPath, result.content);
+          vfs.setSHA(destPath, result.sha);
+          vfs.markClean(destPath);
+          aaronMounted++;
+        }
+        // config.json and other files stay in /src/.aaron/ for direct access
+      } catch (e) {
+        emit?.({ type: 'progress', message: `Warning: failed to mount .aaron/${f.path}: ${e.message}` });
+      }
+    }
+
+    emit?.({ type: 'progress', message: `Mounted ${aaronMounted} .aaron/ file(s)` });
+  }
+
+  return { files: count, skipped, aaronFiles: aaronFiles.length };
 }
 
 // ════════════════════════════════════════════════════

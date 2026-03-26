@@ -18,7 +18,8 @@ import { createVFS, execute, extractCode } from './src/agent-core.js';
 import { runTurn, buildSkillIndex } from './src/agent-loop.js';
 import { runRSI, runSkillRSI } from './src/agent-rsi.js';
 import { createGitHubClient, initFromGitHub, commitToGitHub, parseGitHubRepo } from './src/github.js';
-import { loadSession, saveSession, clearSession } from './src/session.js';
+import { loadSession, saveSession, clearSession, listSessions, migrateLegacySession } from './src/session.js';
+import { snapshotWorkspace, restoreWorkspace, getWorkspaceId, getSelfWorkspaceId, isWorkspacePath } from './src/workspace.js';
 import { buildCreatePrompt, buildImprovePrompt, listWorkflows, runWorkflowSteps, runWorkflowRSI, buildWorkflowScorer } from './src/workflow-runner.js';
 import { getLLMClient } from './src/llm-client.js';
 
@@ -181,6 +182,8 @@ const ui = {
     output.write(c('gray', '  REPL commands:\n'));
     output.write(c('dim',  '  :vfs                               list VFS files\n'));
     output.write(c('dim',  '  :cat /path                         print a VFS file\n'));
+    output.write(c('dim',  '  :repo [owner/repo[@ref]]           show or switch workspace\n'));
+    output.write(c('dim',  '  :workspaces                        list saved workspaces\n'));
     output.write(c('dim',  '  :workflow                          list workflows\n'));
     output.write(c('dim',  '  :workflow create <name> <goal>     create workflow\n'));
     output.write(c('dim',  '  :workflow improve <name> <fb>      revise step prompts\n'));
@@ -335,10 +338,16 @@ async function repl() {
 
   const rl = readline.createInterface({ input, output, terminal: true });
 
+  // Migrate legacy session if present (one-time upgrade to workspace model)
+  await migrateLegacySession();
+
   // Check for saved session and offer to resume
-  const savedSession = await loadSession();
+  // Default to 'self' workspace for initial load
+  const selfId = getSelfWorkspaceId();
+  const savedSession = await loadSession(selfId);
   let state;
   let vfs;
+  let currentWorkspaceId = selfId;
 
   if (savedSession) {
     const age = Date.now() - new Date(savedSession.timestamp).getTime();
@@ -369,6 +378,7 @@ async function repl() {
         emit:  (ev) => ui.emitEvent(ev),
         env:   {},
         skillIndex,
+        workspaceId: currentWorkspaceId,
         github: ghClient ? { owner: ghConfig.owner, repo: ghConfig.repo, ref: ghConfig.ref } : null,
         async commit(message = 'commit') {
           const dirty = vfs.list().filter(p => vfs.isDirty(p));
@@ -433,6 +443,7 @@ async function repl() {
       emit:  (ev) => ui.emitEvent(ev),
       env:   {},
       skillIndex,
+      workspaceId: getSelfWorkspaceId(),
       github: ghClient ? { owner: ghConfig.owner, repo: ghConfig.repo, ref: ghConfig.ref } : null,
       async commit(message = 'commit') {
         const dirty = vfs.list().filter(p => vfs.isDirty(p));
@@ -473,9 +484,14 @@ async function repl() {
 
   const rsiLog = (msg) => output.write(c('cyan', `  rsi  `) + c('gray', msg) + '\n');
 
+  // Set initial workspace ID if not set
+  if (!state.context.workspaceId) {
+    state.context.workspaceId = getSelfWorkspaceId();
+  }
+
   // Graceful exit — save session before quitting
   rl.on('close', async () => {
-    await saveSession(state, vfs);
+    await saveSession(state.context.workspaceId, state, vfs);
     output.write(c('gray', '\nbye\n\n'));
     process.exit(0);
   });
@@ -815,6 +831,145 @@ async function repl() {
       continue;
     }
 
+    // ════════════════════════════════════════════════════
+    // :repo — Workspace management (ADR.md Decision 14)
+    // ════════════════════════════════════════════════════
+
+    if (msg === ':repo' || msg.startsWith(':repo ')) {
+      const args = msg.slice(5).trim();
+
+      // ── :repo (show current) ──
+      if (!args) {
+        const currentId = state.context.workspaceId || 'self';
+        const github = state.context.github;
+        output.write('\n' + c('cyan', '  Current workspace') + '\n');
+        output.write(c('gray', `  id:     ${currentId}\n`));
+        if (github) {
+          output.write(c('gray', `  repo:   ${github.owner}/${github.repo}\n`));
+          output.write(c('gray', `  ref:    ${github.ref}\n`));
+        }
+        const srcFiles = vfs.list().filter(p => p.startsWith('/src/')).length;
+        const projSkills = vfs.list().filter(p => p.startsWith('/project-skills/')).length;
+        output.write(c('gray', `  files:  ${srcFiles} in /src/, ${projSkills} project skills\n`));
+        output.write(c('gray', '\n  Use :repo <owner/repo> to switch, or :workspaces to list saved.\n'));
+        continue;
+      }
+
+      // ── :repo list / :workspaces ──
+      if (args === 'list' || msg === ':workspaces') {
+        const sessions = await listSessions();
+        if (sessions.length === 0) {
+          output.write(c('gray', '  No saved workspaces.\n'));
+          output.write(c('gray', '  Switch to a repo: :repo owner/repo[@ref]\n'));
+        } else {
+          output.write('\n' + c('cyan', '  Saved workspaces:') + '\n\n');
+          for (const s of sessions) {
+            const age = Date.now() - new Date(s.timestamp).getTime();
+            const hours = Math.floor(age / 3600000);
+            const mins = Math.floor(age / 60000) % 60;
+            const ageStr = hours > 0 ? `${hours}h ${mins}m ago` : `${mins}m ago`;
+            const current = s.workspaceId === (state.context.workspaceId || 'self');
+            const marker = current ? c('green', '▸ ') : '  ';
+            output.write(marker + c('amber', s.workspaceId) + c('gray', `  (${ageStr})`) + '\n');
+          }
+        }
+        continue;
+      }
+
+      // ── :repo <owner/repo[@ref]> — switch workspace ──
+      const repoStr = args;
+      const targetRepo = parseGitHubRepo(repoStr);
+      if (!targetRepo) {
+        output.write(c('red', '  Invalid repo format. Use: owner/repo or owner/repo@ref\n'));
+        output.write(c('gray', '  Example: :repo weolopez/aaron-test-repo\n'));
+        continue;
+      }
+
+      if (!ghClient) {
+        output.write(c('red', '  GitHub not configured. Set GITHUB_TOKEN env var.\n'));
+        continue;
+      }
+
+      const targetId = getWorkspaceId(targetRepo.owner, targetRepo.repo, targetRepo.ref);
+      const currentId = state.context.workspaceId || 'self';
+
+      if (targetId === currentId) {
+        output.write(c('gray', `  Already in workspace: ${targetId}\n`));
+        continue;
+      }
+
+      output.write('\n' + c('cyan', `  Switching workspace`) + '\n');
+      output.write(c('gray', `  from: ${currentId}\n`));
+      output.write(c('gray', `  to:   ${targetId}\n`));
+
+      // Save current workspace
+      output.write(c('gray', '\n  Saving current workspace...\n'));
+      await saveSession(currentId, state, vfs);
+
+      // Snapshot current workspace layer
+      const currentBundle = snapshotWorkspace(vfs, state);
+
+      // Try to load existing target workspace
+      const targetSession = await loadSession(targetId);
+
+      if (targetSession) {
+        // Restore saved target workspace
+        output.write(c('gray', `  Restoring saved workspace: ${targetId}\n`));
+        restoreWorkspace(vfs, { ...currentBundle, ...targetSession.vfs }); // Merge to keep agent layer
+        if (targetSession.state) {
+          state.history = targetSession.state.history || [];
+          state.turn = targetSession.state.turn || 0;
+        }
+      } else {
+        // Fresh hydration from GitHub
+        output.write(c('gray', `  Hydrating from GitHub: ${targetRepo.owner}/${targetRepo.repo}@${targetRepo.ref}\n`));
+        restoreWorkspace(vfs, {}); // Clear workspace layer
+        try {
+          const result = await initFromGitHub(targetRepo, vfs, ghClient, (ev) => ui.emitEvent(ev));
+          output.write(c('green', `  ✓ `) + c('gray', `${result.files} files hydrated`) + '\n');
+          if (result.aaronFiles > 0) {
+            output.write(c('green', `  ✓ `) + c('gray', `${result.aaronFiles} .aaron/ file(s) mounted`) + '\n');
+          }
+          state.history = [];
+          state.turn = 0;
+        } catch (e) {
+          output.write(c('red', `  ✕ Hydration failed: ${e.message}\n`));
+          output.write(c('gray', '  Restoring previous workspace...\n'));
+          restoreWorkspace(vfs, currentBundle);
+          continue;
+        }
+      }
+
+      // Update context
+      state.context.workspaceId = targetId;
+      state.context.github = { owner: targetRepo.owner, repo: targetRepo.repo, ref: targetRepo.ref };
+      state.context.skillIndex = buildSkillIndex(vfs);
+
+      output.write(c('green', '\n  ✓ ') + c('gray', `Switched to workspace: ${targetId}`) + '\n');
+      ui.hr();
+      continue;
+    }
+
+    if (msg === ':workspaces') {
+      // Alias for :repo list
+      const sessions = await listSessions();
+      if (sessions.length === 0) {
+        output.write(c('gray', '  No saved workspaces.\n'));
+      } else {
+        output.write('\n' + c('cyan', '  Saved workspaces:') + '\n\n');
+        for (const s of sessions) {
+          const age = Date.now() - new Date(s.timestamp).getTime();
+          const hours = Math.floor(age / 3600000);
+          const mins = Math.floor(age / 60000) % 60;
+          const ageStr = hours > 0 ? `${hours}h ${mins}m ago` : `${mins}m ago`;
+          const current = s.workspaceId === (state.context.workspaceId || 'self');
+          const marker = current ? c('green', '▸ ') : '  ';
+          output.write(marker + c('amber', s.workspaceId) + c('gray', `  (${ageStr})`) + '\n');
+        }
+      }
+      continue;
+    }
+
     if (msg === ':help' || msg === ':h') {
       ui.banner();
       continue;
@@ -828,7 +983,7 @@ async function repl() {
 
     ui.user(msg);
     await runTurn(msg, state, deps);
-    await saveSession(state, vfs);
+    await saveSession(state.context.workspaceId, state, vfs);
   }
 }
 

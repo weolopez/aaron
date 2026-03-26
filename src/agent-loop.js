@@ -93,10 +93,15 @@ export function parseSkillFrontmatter(content) {
   return { name, description };
 }
 
-/** Scan VFS for skill SKILL.md files, return formatted index string for SYSTEM prompt. */
+/** Scan VFS for skill SKILL.md files, return formatted index string for SYSTEM prompt.
+ *  Scans both /skills/ (core) and /project-skills/ (project) — project wins on collision.
+ */
 export function buildSkillIndex(vfs) {
-  const skills = [];
+  const coreSkills = new Map();
+  const projectSkills = new Map();
   const allPaths = vfs.list();
+
+  // Scan core skills: /skills/<name>/SKILL.md
   for (const path of allPaths) {
     if (!path.startsWith('/skills/') || !path.endsWith('/SKILL.md')) continue;
     const parts = path.split('/');
@@ -110,16 +115,51 @@ export function buildSkillIndex(vfs) {
     const resources = allPaths
       .filter(p => p.startsWith(prefix) && p !== path)
       .map(p => p.slice(prefix.length));
-    skills.push({ ...meta, path, resources });
+    coreSkills.set(meta.name, { ...meta, path, resources, scope: 'core' });
   }
-  if (skills.length === 0) return '';
+
+  // Scan project skills: /project-skills/<name>/SKILL.md
+  for (const path of allPaths) {
+    if (!path.startsWith('/project-skills/') || !path.endsWith('/SKILL.md')) continue;
+    const parts = path.split('/');
+    if (parts.length !== 4) continue; // /project-skills/<name>/SKILL.md
+    const content = vfs.read(path);
+    if (!content) continue;
+    const meta = parseSkillFrontmatter(content);
+    if (!meta) continue;
+    // Discover supplementary files
+    const prefix = `/project-skills/${meta.name}/`;
+    const resources = allPaths
+      .filter(p => p.startsWith(prefix) && p !== path)
+      .map(p => p.slice(prefix.length));
+    projectSkills.set(meta.name, { ...meta, path, resources, scope: 'project' });
+  }
+
+  // Merge: project skills override core on name collision
+  const merged = new Map(coreSkills);
+  for (const [name, skill] of projectSkills) {
+    merged.set(name, skill); // project wins on collision
+  }
+
+  if (merged.size === 0) return '';
+
   let index = '\nAVAILABLE SKILLS \u2014 read the full SKILL.md when the task matches:\n';
   index += '  Skills may bundle references/ and scripts/ \u2014 SKILL.md will tell you what to read.\n';
-  for (const s of skills) {
-    index += `  - ${s.name}: ${s.description} \u2192 context.vfs.read('${s.path}')`;
+
+  // Sort: project skills first, then core skills
+  const sortedSkills = [...merged.values()].sort((a, b) => {
+    if (a.scope === 'project' && b.scope === 'core') return -1;
+    if (a.scope === 'core' && b.scope === 'project') return 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  for (const s of sortedSkills) {
+    const scopeTag = s.scope === 'project' ? ' [project]' : '';
+    index += `  - ${s.name}: ${s.description} \u2192 context.vfs.read('${s.path}')${scopeTag}`;
     if (s.resources.length > 0) index += ` [+${s.resources.length} files]`;
     index += '\n';
   }
+
   return index;
 }
 
