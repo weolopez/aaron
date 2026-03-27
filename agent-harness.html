@@ -1126,6 +1126,7 @@ const agentState = {
     vfs,
     fetch: (...args) => fetch(...args),
     emit: (ev) => ui.emitEvent(ev),
+    approve: (msg) => window.confirm(`⚠️ Agent Authorization Required\n\n${msg}\n\nAllow execution?`),
     env: {},
     github: null,
     async commit(message = 'commit') {

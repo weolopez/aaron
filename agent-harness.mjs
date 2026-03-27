@@ -11,6 +11,7 @@
 
 import readline from 'node:readline/promises';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stdin as input, stdout as output, env } from 'node:process';
@@ -63,14 +64,37 @@ const c = (color, str) => `${A[color]}${str}${A.reset}`;
 // CONFIG
 // ════════════════════════════════════════════════════
 
-const GITHUB_TOKEN = env.GITHUB_TOKEN ?? '';
+/**
+ * Resolve GitHub token: prefer GITHUB_TOKEN env var, fall back to `gh auth token`.
+ * Returns '' if neither is available.
+ */
+function resolveGitHubToken() {
+  if (env.GITHUB_TOKEN) return env.GITHUB_TOKEN;
+  try {
+    const token = execSync('gh auth token', { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+    if (token) {
+      output.write(c('gray', '  github token: ') + c('dim', 'from gh CLI') + '\n');
+      return token;
+    }
+  } catch {
+    // gh CLI not installed or not logged in — fall through
+  }
+  return '';
+}
+
+const GITHUB_TOKEN = resolveGitHubToken();
 const GITHUB_REPO  = env.GITHUB_REPO ?? '';   // "owner/repo" or "owner/repo@ref"
 
-// GitHub client (created only when GITHUB_TOKEN is set)
+// GitHub client (created only when token is available)
 const ghConfig = parseGitHubRepo(GITHUB_REPO);
 const ghClient = GITHUB_TOKEN && ghConfig
   ? createGitHubClient({ token: GITHUB_TOKEN })
   : null;
+
+if (GITHUB_REPO && !ghClient) {
+  output.write(c('red', '  ✕ GitHub token not found.\n'));
+  output.write(c('gray', '    Set GITHUB_TOKEN or run: ') + c('dim', 'gh auth login') + '\n\n');
+}
 
 // ════════════════════════════════════════════════════
 // GITHUB HELPER — full API surface exposed to agent
@@ -214,7 +238,7 @@ const ui = {
   },
 
   banner() {
-    const provider = env.LLM_PROVIDER ?? 'anthropic';
+    const provider = env.LLM_PROVIDER ?? (env.ANTHROPIC_API_KEY ? 'anthropic' : 'askarchitect');
     output.write('\n');
     output.write(c('amber', '  aaron') + c('gray', '  isomorphic coding agent\n'));
     output.write(c('gray',  '  provider: ') + c('dim', provider) + '\n');
@@ -369,7 +393,7 @@ function flushToDisk(vfs, paths) {
 // ════════════════════════════════════════════════════
 
 async function repl() {
-  const provider = env.LLM_PROVIDER ?? 'anthropic';
+  const provider = env.LLM_PROVIDER ?? (env.ANTHROPIC_API_KEY ? 'anthropic' : 'askarchitect');
   if (provider === 'anthropic' && !env.ANTHROPIC_API_KEY) {
     output.write(c('red', '\nError: ANTHROPIC_API_KEY is not set.\n'));
     output.write(c('gray', 'Usage: ANTHROPIC_API_KEY=sk-ant-... node agent-harness.mjs\n\n'));
@@ -483,6 +507,7 @@ async function repl() {
       vfs,
       fetch: (...args) => fetch(...args),
       emit:  (ev) => ui.emitEvent(ev),
+      approve: () => true,  // CLI: auto-approve risky patterns (user has shell access)
       env:   {},
       skillIndex,
       workspaceId: getSelfWorkspaceId(),
@@ -556,7 +581,7 @@ async function repl() {
     }
 
     if (msg === ':reset') {
-      await clearSession();
+      await clearSession(state.context.workspaceId);
       output.write(c('gray', '  session cleared\n'));
       continue;
     }
@@ -984,7 +1009,7 @@ async function repl() {
 
       // Update context
       state.context.workspaceId = targetId;
-      state.context.github = { owner: targetRepo.owner, repo: targetRepo.repo, ref: targetRepo.ref };
+      state.context.github = ghClient ? makeGitHubHelper(ghClient, targetRepo) : null;
       state.context.skillIndex = buildSkillIndex(vfs);
 
       output.write(c('green', '\n  ✓ ') + c('gray', `Switched to workspace: ${targetId}`) + '\n');
@@ -1034,7 +1059,7 @@ async function repl() {
 // ════════════════════════════════════════════════════
 
 function requireKey() {
-  const provider = env.LLM_PROVIDER ?? 'anthropic';
+  const provider = env.LLM_PROVIDER ?? (env.ANTHROPIC_API_KEY ? 'anthropic' : 'askarchitect');
   if (provider === 'anthropic' && !env.ANTHROPIC_API_KEY) {
     output.write(c('red', 'Error: ANTHROPIC_API_KEY is not set.\n'));
     process.exit(1);
@@ -1042,10 +1067,21 @@ function requireKey() {
   // askarchitect doesn't need an API key upfront (uses session auth)
 }
 
-function createRunContext() {
+async function createRunContext() {
   const vfs = createVFS();
   hydrateHarness(vfs);
   writeManifest();
+
+  // GitHub hydration (if configured)
+  if (ghClient && ghConfig) {
+    try {
+      const result = await initFromGitHub(ghConfig, vfs, ghClient, (ev) => ui.emitEvent(ev));
+      output.write(c('green', `  ✓ `) + c('gray', `${result.files} files hydrated from GitHub`) + '\n');
+    } catch (e) {
+      output.write(c('red', `  ✕ GitHub hydration failed: ${e.message}\n`));
+    }
+  }
+
   const skillIndex = buildSkillIndex(vfs);
   const rsiLog = (msg) => output.write(c('cyan', `  rsi  `) + c('gray', msg) + '\n');
 
@@ -1053,9 +1089,11 @@ function createRunContext() {
     vfs,
     fetch: (...args) => fetch(...args),
     emit:  (ev) => ui.emitEvent(ev),
+    approve: () => true,  // CLI: auto-approve risky patterns (user has shell access)
     env:   {},
     skillIndex,
-    github: ghClient ? { owner: ghConfig.owner, repo: ghConfig.repo, ref: ghConfig.ref } : null,
+    workspaceId: ghConfig ? getWorkspaceId(ghConfig.owner, ghConfig.repo, ghConfig.ref) : getSelfWorkspaceId(),
+    github: ghClient ? makeGitHubHelper(ghClient, ghConfig) : null,
     async commit(message = 'commit') {
       const dirty = vfs.list().filter(p => vfs.isDirty(p));
       const written = flushToDisk(vfs, dirty);
@@ -1086,7 +1124,7 @@ function createRunContext() {
 
 async function run(prompt) {
   requireKey();
-  const { state, deps } = createRunContext();
+  const { state, deps } = await createRunContext();
   ui.setStatus('thinking');
   await runTurn(prompt, state, deps);
 }
@@ -1162,7 +1200,7 @@ async function skillShow(name) {
 
 async function skillRSI(name, evalTask, budget, mode) {
   requireKey();
-  const { vfs, state, deps, rsiLog } = createRunContext();
+  const { vfs, state, deps, rsiLog } = await createRunContext();
 
   const skillPath = `/skills/${name}/SKILL.md`;
   const existing = vfs.read(skillPath);
@@ -1280,14 +1318,14 @@ async function workflowList() {
 
 async function workflowCreate(wfName, goal) {
   requireKey();
-  const { state, deps } = createRunContext();
+  const { state, deps } = await createRunContext();
   output.write('\n' + c('cyan', `  Creating workflow: ${wfName}`) + '\n\n');
   await runTurn(buildCreatePrompt(wfName, goal), state, deps);
 }
 
 async function workflowImprove(wfName, feedback) {
   requireKey();
-  const { vfs, state, deps } = createRunContext();
+  const { vfs, state, deps } = await createRunContext();
   if (!vfs.read(`/workflows/${wfName}.json`)) {
     output.write(c('red', `  Workflow "${wfName}" not found.\n`));
     output.write(c('gray', `  Create it first: aaron workflow create ${wfName} "goal"\n`));
@@ -1299,7 +1337,7 @@ async function workflowImprove(wfName, feedback) {
 
 async function workflowRun(wfName) {
   requireKey();
-  const { vfs, state, deps } = createRunContext();
+  const { vfs, state, deps } = await createRunContext();
   const wfRaw = vfs.read(`/workflows/${wfName}.json`);
   if (!wfRaw) {
     output.write(c('red', `  Workflow "${wfName}" not found.\n`));

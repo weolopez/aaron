@@ -30,7 +30,7 @@ export function createGitHubClient({ token, fetch: fetchFn = fetch }) {
       opts.headers['Content-Type'] = 'application/json';
       opts.body = JSON.stringify(body);
     }
-    const res = await fetchFn(`${API}${path}`, opts);
+    const res = await fetchFn(`${API}${path}`, opts);  // uses injected or default API base
 
     // Rate limit warning
     const remaining = res.headers.get('x-ratelimit-remaining');
@@ -67,7 +67,8 @@ export function createGitHubClient({ token, fetch: fetchFn = fetch }) {
      */
     async getTree(owner, repo, ref = 'main') {
       const data = await request('GET', `/repos/${owner}/${repo}/git/trees/${ref}?recursive=1`);
-      if (!data || !data.tree) return [];
+      if (data === null) return null; // 404 — repo or ref not found
+      if (!data.tree) return [];
       return data.tree
         .filter(n => n.type === 'blob')
         .map(n => ({ path: n.path, sha: n.sha, size: n.size }));
@@ -229,8 +230,12 @@ export async function initFromGitHub(config, vfs, client, emit) {
   emit?.({ type: 'progress', message: `Fetching tree from ${owner}/${repo}@${ref}...` });
 
   const tree = await client.getTree(owner, repo, ref);
+  if (tree === null) {
+    emit?.({ type: 'progress', message: `Repository not found or not accessible: ${owner}/${repo}@${ref}` });
+    return { files: 0, skipped: 0 };
+  }
   if (!tree.length) {
-    emit?.({ type: 'progress', message: 'Repository is empty or not found.' });
+    emit?.({ type: 'progress', message: 'Repository is empty (no files).' });
     return { files: 0, skipped: 0 };
   }
 

@@ -82,18 +82,113 @@ export function createVFS() {
 // EXECUTOR
 // ════════════════════════════════════════════════════
 
+/**
+ * Risky code patterns — checked before AsyncFunction execution.
+ * Browser: triggers HITL approval via context.approve().
+ * CLI: benign (user already has shell access).
+ */
+export const RISKY_PATTERNS = [
+  // Network & Data Exfiltration
+  /\bWebSocket\b/,
+  /navigator\.sendBeacon/,
+
+  // State Mutation & Storage
+  /document\.cookie/,
+  /\blocalStorage\b/,
+  /\bsessionStorage\b/,
+  /\bindexedDB\b/,
+
+  // High-Privilege APIs & Navigation
+  /navigator\.geolocation/,
+  /navigator\.mediaDevices/,
+  /navigator\.clipboard/,
+  /window\.location/,
+
+  // Destructive DOM Manipulation
+  /document\.write\s*\(/,
+  /\.innerHTML\s*=/,
+];
+
+/**
+ * Isomorphic code executor with safety checks, console capture,
+ * and structured execution metadata.
+ *
+ * @param {string} code - JS code to execute as AsyncFunction body
+ * @param {object} context - agent context (vfs, emit, fetch, etc.)
+ * @param {number} [timeoutMs=15000] - execution timeout
+ * @returns {{ result: any, stdout: string[], stderr: string[], duration: number, isError: boolean, error?: string, riskyPattern?: RegExp }}
+ */
 export async function execute(code, context, timeoutMs = 15_000) {
-  const Fn = Object.getPrototypeOf(async function () {}).constructor;
-  const fn = new Fn('context', code);
-  return await Promise.race([
-    fn(context),
-    new Promise((_, reject) =>
-      setTimeout(
-        () => reject(new Error(`Execution timeout after ${timeoutMs}ms`)),
-        timeoutMs,
+  const start = Date.now();
+  const stdout = [];
+  const stderr = [];
+
+  // ── HITL: static pattern check ──────────────────────
+  const matchedPattern = RISKY_PATTERNS.find(p => p.test(code));
+  if (matchedPattern) {
+    // context.approve is injected by the host harness:
+    //   Browser → window.confirm wrapper
+    //   CLI     → auto-approve (or readline prompt)
+    const approve = context.approve ?? (() => true);
+    const approved = await approve(
+      `Agent code matches risky pattern: ${matchedPattern}\n\n${code.slice(0, 250)}${code.length > 250 ? '...' : ''}`
+    );
+    if (!approved) {
+      return {
+        result: undefined,
+        stdout, stderr,
+        duration: Date.now() - start,
+        isError: true,
+        error: 'Execution denied by user (risky pattern detected).',
+        riskyPattern: matchedPattern,
+      };
+    }
+  }
+
+  // ── Console capture ─────────────────────────────────
+  const _log = console.log;
+  const _err = console.error;
+  const _warn = console.warn;
+  console.log  = (...a) => { stdout.push(a.map(String).join(' ')); _log(...a); };
+  console.error = (...a) => { stderr.push(a.map(String).join(' ')); _err(...a); };
+  console.warn  = (...a) => { stderr.push('[warn] ' + a.map(String).join(' ')); _warn(...a); };
+
+  try {
+    const Fn = Object.getPrototypeOf(async function () {}).constructor;
+    const fn = new Fn('context', code);
+    const result = await Promise.race([
+      fn(context),
+      new Promise((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`Execution timeout after ${timeoutMs}ms`)),
+          timeoutMs,
+        ),
       ),
-    ),
-  ]);
+    ]);
+
+    const duration = Date.now() - start;
+    return {
+      result,
+      stdout, stderr,
+      duration,
+      isError: false,
+    };
+  } catch (err) {
+    const duration = Date.now() - start;
+    // Re-throw so the existing error-recovery loop in agent-loop.js still works,
+    // but attach metadata to the error for callers that want it.
+    err.execMeta = {
+      stdout, stderr,
+      duration,
+      isError: true,
+      error: err.message,
+    };
+    throw err;
+  } finally {
+    console.log = _log;
+    console.error = _err;
+    console.warn = _warn;
+  }
 }
 
 // ════════════════════════════════════════════════════

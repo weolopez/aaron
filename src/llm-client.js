@@ -498,7 +498,7 @@ async function makeServerRequest(session, method, path, body, serverUrl) {
 }
 
 export function createAskArchitectClient({
-  model = 'gpt-4.1-mini',
+  model = 'gpt-5.2',
   useGeneric = true,
   serverUrl = ASKARCHITECT_SERVER_URL,
   interactive = true,

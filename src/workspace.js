@@ -257,8 +257,10 @@ export function switchWorkspace(vfs, state, targetBundle, options = {}) {
  * @returns {string} Bundle key like 'src'
  */
 function prefixToKey(prefix) {
-  // Remove leading and trailing slashes
-  return prefix.replace(/^\//, '').replace(/\/$/, '');
+  // Remove leading and trailing slashes, then camelCase hyphenated segments
+  // e.g. '/project-skills/' → 'projectSkills'
+  return prefix.replace(/^\//, '').replace(/\/$/, '')
+    .replace(/-([a-z])/g, (_, ch) => ch.toUpperCase());
 }
 
 /**

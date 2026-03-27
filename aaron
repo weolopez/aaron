@@ -15,4 +15,4 @@
 #   aaron workflow improve <name> "feedback"     revise step prompts
 #   aaron workflow run <name>                    run or resume a workflow
 #   aaron :workflow <sub> ...                    colon prefix also works
-exec node "$(dirname "$0")/agent-harness.mjs" "$@"
+exec node "/Users/ml5174/Development/github/aaron/agent-harness.mjs" "$@"

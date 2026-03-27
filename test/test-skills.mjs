@@ -4,18 +4,18 @@ import { readFileSync } from 'fs';
 
 // ═══ parseSkillFrontmatter ═══
 
-const content = readFileSync('skills/component-builder/SKILL.md', 'utf8');
+const content = readFileSync('skills/bug-fixer/SKILL.md', 'utf8');
 const meta = parseSkillFrontmatter(content);
-console.assert(meta.name === 'component-builder', 'name matches');
-console.assert(meta.description.includes('isomorphic'), 'description matches');
+console.assert(meta.name === 'bug-fixer', 'name matches');
+console.assert(meta.description.includes('bug'), 'description matches');
 console.log('PASS: parseSkillFrontmatter');
 
 // ═══ buildSkillIndex ═══
 
 const vfs = createVFS();
-vfs.write('/skills/component-builder/SKILL.md', content);
+vfs.write('/skills/bug-fixer/SKILL.md', content);
 const index = buildSkillIndex(vfs);
-console.assert(index.includes('component-builder'), 'index has skill name');
+console.assert(index.includes('bug-fixer'), 'index has skill name');
 console.assert(index.includes('context.vfs.read'), 'index has VFS path');
 console.log('PASS: buildSkillIndex');
 

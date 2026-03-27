@@ -204,7 +204,21 @@ export async function runTurn(userMessage, state, { execute, extractCode, ui }) 
       ui.showCode(code);
       ui.setStatus('running');
 
-      await execute(code, state.context);
+      const execResult = await execute(code, state.context);
+
+      // HITL denial — agent code was blocked by the user
+      if (execResult?.isError) {
+        ui.emitEvent({ type: 'error', message: execResult.error });
+        ui.setStatus('idle');
+        return;
+      }
+
+      // Surface captured console output as events
+      if (execResult?.stdout?.length) {
+        for (const line of execResult.stdout) {
+          ui.emitEvent({ type: 'progress', message: line });
+        }
+      }
 
       // Auto-commit dirty files to disk
       const dirty = state.context.vfs.list().filter(p => state.context.vfs.isDirty(p));
@@ -218,7 +232,7 @@ export async function runTurn(userMessage, state, { execute, extractCode, ui }) 
       ui.onTurnComplete(state.turn, state.context.vfs);
 
       // Persist session
-      await saveSession(state, state.context.vfs);
+      await saveSession(state.context.workspaceId, state, state.context.vfs);
 
       return;
 
