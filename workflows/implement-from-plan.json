@@ -1,0 +1,24 @@
+{
+  "name": "implement-from-plan",
+  "description": "Execute an existing implementation plan: write all files then open a PR",
+  "steps": [
+    {
+      "id": "read-plan",
+      "skill": "code-planner",
+      "prompt": "Read the existing plan file. Check /scratch/ for any plan.md files (use context.vfs.list() to find them). If no plan exists, look for any requirements or spec files in VFS. Write a concrete plan to /scratch/implement-from-plan/plan.md with explicit file paths, content descriptions, and implementation order. Emit the plan as a result event."
+    },
+    {
+      "id": "implement",
+      "prompt": "Read /scratch/implement-from-plan/plan.md. For each file listed under 'files to create': implement the full file content and write it to the specified /src/ path. For each file listed under 'files to modify': read the current content, apply the described change, and write it back. Emit file_write for each file written. Emit metric events: { name: 'files_created', value: N, unit: 'files' } and { name: 'files_modified', value: M, unit: 'files' }. End with done emit listing all written paths."
+    },
+    {
+      "id": "verify",
+      "prompt": "Review the implementation: read each /src/ file that was just written. Check for: syntax errors (unmatched braces, unclosed strings), missing imports, broken references to functions or modules that don't exist in VFS. Report issues as progress events. Write a verification summary to /scratch/implement-from-plan/verification.md. Emit result with { verified: true/false, issues: [...] }."
+    },
+    {
+      "id": "open-pr",
+      "skill": "github-pr",
+      "prompt": "Read /scratch/implement-from-plan/plan.md and /scratch/implement-from-plan/verification.md. Create branch feat/implement-<timestamp> (use Date.now() for timestamp). Commit all dirty /src/ files to that branch. Open a pull request: title from the plan goal, body with implementation summary and verification results, test plan checklist. Emit PR URL as result. Emit done with PR URL."
+    }
+  ]
+}

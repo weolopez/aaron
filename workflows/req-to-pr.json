@@ -1,0 +1,20 @@
+{
+  "name": "req-to-pr",
+  "description": "Turn a requirements document into a pull request: plan, implement, and open a PR",
+  "steps": [
+    {
+      "id": "plan",
+      "skill": "code-planner",
+      "prompt": "Read any requirements or specification files in the VFS (check /src/, /memory/, /scratch/ for files named requirements*, spec*, README*). Analyze the existing codebase structure in /src/. Write a detailed implementation plan to /scratch/req-to-pr/plan.md covering: files to create, files to modify, implementation order, and success criteria. Do NOT write any /src/ code yet — planning only."
+    },
+    {
+      "id": "implement",
+      "prompt": "Read the plan at /scratch/req-to-pr/plan.md. Implement ALL the files listed in 'files to create' and make ALL the changes listed in 'files to modify'. Write each file to /src/ as specified in the plan. Emit file_write for each file. Emit progress between major steps. When all files are written, emit a metric with the count of files created."
+    },
+    {
+      "id": "open-pr",
+      "skill": "github-pr",
+      "prompt": "Read /scratch/req-to-pr/plan.md for context on what was implemented. Create a feature branch named feat/req-to-pr-<timestamp> where <timestamp> is Date.now(). Commit all dirty /src/ files to that branch. Open a pull request with: title summarizing the feature, body with a bullet-list summary of what was implemented (from the plan), and a test plan checklist. Emit the PR URL as a result."
+    }
+  ]
+}

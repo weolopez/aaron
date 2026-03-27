@@ -1,0 +1,21 @@
+{
+  "name": "bug-fix",
+  "description": "Diagnose a bug report, implement a targeted fix, and open a PR",
+  "steps": [
+    {
+      "id": "diagnose",
+      "skill": "bug-fixer",
+      "prompt": "A bug has been reported. Read the bug description from /memory/bug-report.md if it exists, or from the workflow context. Search /src/ for the relevant files (look for filenames or patterns mentioned in the bug report). Read the failing code carefully. Identify the root cause. Write a diagnosis to /scratch/bug-fix/diagnosis.md covering: root cause, affected file(s) and line(s), proposed minimal fix. Do NOT modify any /src/ files yet."
+    },
+    {
+      "id": "fix",
+      "skill": "bug-fixer",
+      "prompt": "Read /scratch/bug-fix/diagnosis.md for the root cause and proposed fix. Apply the MINIMAL fix to the identified file(s) in /src/. Do not refactor, do not add features — fix only the root cause. Re-read each fixed file and verify the fix is correctly applied. Write /scratch/bug-fix/fix-summary.md with: file changed, lines changed, before/after description. Emit file_write for each file modified."
+    },
+    {
+      "id": "open-pr",
+      "skill": "github-pr",
+      "prompt": "Read /scratch/bug-fix/diagnosis.md and /scratch/bug-fix/fix-summary.md. Create branch fix/bug-<timestamp> (use Date.now() for timestamp). Commit all dirty /src/ files. Open a pull request: title 'fix: <one-line description of bug>', body with root cause explanation, fix description, and test plan (how to verify the fix). Emit PR URL as result."
+    }
+  ]
+}

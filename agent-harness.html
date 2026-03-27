@@ -777,6 +777,7 @@ const EV_ICONS = {
   file_write: '✦',
   file_read:  '◇',
   done:       '✓',
+  blocked:    '⊘',
   error:      '✕',
   metric:     '▪',
   experiment: '◉',
@@ -863,6 +864,7 @@ const ui = {
       case 'file_write': text = ev.path ?? ''; break;
       case 'file_read':  text = ev.path ?? ''; break;
       case 'done':       text = ev.message ?? 'done'; break;
+      case 'blocked':    text = ev.reason ?? 'blocked'; break;
       case 'error':      text = ev.message ?? 'error'; break;
       case 'metric':     text = `${ev.name}: ${ev.value} ${ev.unit ?? ''}`; break;
       case 'experiment': text = `${ev.kept ? 'kept' : 'discarded'}: ${ev.reason ?? ''}`; break;
@@ -875,12 +877,18 @@ const ui = {
     eventsEl.appendChild(el);
     eventsEl.scrollTop = eventsEl.scrollHeight;
 
-    // Mirror 'done' into conversation
-    if (ev.type === 'done') {
+    // Mirror 'done' and 'blocked' into conversation
+    if (ev.type === 'done' || ev.type === 'blocked') {
       const d = document.createElement('div');
       d.className = 'msg agent';
-      d.innerHTML = `<div class="msg-label">agent → done</div>
-        <div class="msg-bubble" style="background:var(--cyan-lo);border-color:var(--cyan-brd);color:var(--cyan);">${esc(ev.message ?? '')}</div>`;
+      const isBlocked = ev.type === 'blocked';
+      const label = isBlocked ? 'agent → blocked' : 'agent → done';
+      const style = isBlocked
+        ? 'background:var(--red-lo,#2a1515);border-color:var(--red-brd,#7a2020);color:var(--red,#f87171);'
+        : 'background:var(--cyan-lo);border-color:var(--cyan-brd);color:var(--cyan);';
+      const msg = isBlocked ? (ev.reason ?? '') : (ev.message ?? '');
+      d.innerHTML = `<div class="msg-label">${label}</div>
+        <div class="msg-bubble" style="${style}">${esc(msg)}</div>`;
       convEl.appendChild(d);
       convEl.scrollTop = convEl.scrollHeight;
     }

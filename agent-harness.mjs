@@ -73,6 +73,45 @@ const ghClient = GITHUB_TOKEN && ghConfig
   : null;
 
 // ════════════════════════════════════════════════════
+// GITHUB HELPER — full API surface exposed to agent
+// ════════════════════════════════════════════════════
+
+/**
+ * Build a bound GitHub helper for a specific repo.
+ * All methods are pre-bound to owner/repo so agent code stays concise.
+ */
+function makeGitHubHelper(client, cfg) {
+  const { owner, repo, ref } = cfg;
+  return {
+    owner, repo, ref,
+    async getLatestSha(branch = ref) {
+      const data = await client.getBranch(owner, repo, branch);
+      if (!data) throw new Error(`Branch not found: ${branch}`);
+      return data.sha;
+    },
+    async createBranch(name, fromRef = ref) {
+      const sha = await this.getLatestSha(fromRef);
+      await client.createBranch(owner, repo, name, sha);
+    },
+    async createPR({ title, body, head, base = 'main' }) {
+      return client.createPR(owner, repo, { title, body, head, base });
+    },
+    async listPRs(state = 'open') {
+      return client.listPRs(owner, repo, state);
+    },
+    async getPR(number) {
+      return client.getPR(owner, repo, number);
+    },
+    async mergePR(number, opts) {
+      return client.mergePR(owner, repo, number, opts);
+    },
+    async deleteBranch(name) {
+      return client.deleteBranch(owner, repo, name);
+    },
+  };
+}
+
+// ════════════════════════════════════════════════════
 // CLI UI (implements UI adapter for runTurn)
 // ════════════════════════════════════════════════════
 
@@ -82,6 +121,7 @@ const EV_ICONS = {
   file_write: c('amber', '✦'),
   file_read:  c('gray',  '◇'),
   done:       c('green', '✓'),
+  blocked:    c('red',   '⊘'),
   error:      c('red',   '✕'),
   metric:     c('blue',  '▪'),
   experiment: c('cyan',  '◉'),
@@ -127,6 +167,7 @@ const ui = {
       case 'file_write': text = ev.path ?? ''; break;
       case 'file_read':  text = ev.path ?? ''; break;
       case 'done':       text = ev.message ?? 'done'; break;
+      case 'blocked':    text = ev.reason ?? 'blocked'; break;
       case 'error':      text = ev.message ?? 'error'; break;
       case 'metric':     text = `${ev.name}: ${ev.value} ${ev.unit ?? ''}`; break;
       case 'experiment': text = `${ev.kept ? 'kept' : 'discarded'}: ${ev.reason ?? ''}`; break;
@@ -134,6 +175,7 @@ const ui = {
     }
     const colored =
       ev.type === 'done'       ? c('green', text) :
+      ev.type === 'blocked'    ? c('red',   text) :
       ev.type === 'error'      ? c('red',   text) :
       ev.type === 'file_write' ? c('amber', text) :
       ev.type === 'result'     ? c('white', text) :
@@ -379,8 +421,8 @@ async function repl() {
         env:   {},
         skillIndex,
         workspaceId: currentWorkspaceId,
-        github: ghClient ? { owner: ghConfig.owner, repo: ghConfig.repo, ref: ghConfig.ref } : null,
-        async commit(message = 'commit') {
+        github: ghClient ? makeGitHubHelper(ghClient, ghConfig) : null,
+        async commit(message = 'commit', branch) {
           const dirty = vfs.list().filter(p => vfs.isDirty(p));
           const written = flushToDisk(vfs, dirty);
           writeManifest();
@@ -390,7 +432,7 @@ async function repl() {
               try {
                 await commitToGitHub(vfs, ghClient, {
                   owner: ghConfig.owner, repo: ghConfig.repo,
-                  branch: ghConfig.ref, message, pathPrefix: '/src/',
+                  branch: branch ?? ghConfig.ref, message, pathPrefix: '/src/',
                 }, (ev) => context.emit(ev));
               } catch { /* logged by commitToGitHub */ }
             }
@@ -444,8 +486,8 @@ async function repl() {
       env:   {},
       skillIndex,
       workspaceId: getSelfWorkspaceId(),
-      github: ghClient ? { owner: ghConfig.owner, repo: ghConfig.repo, ref: ghConfig.ref } : null,
-      async commit(message = 'commit') {
+      github: ghClient ? makeGitHubHelper(ghClient, ghConfig) : null,
+      async commit(message = 'commit', branch) {
         const dirty = vfs.list().filter(p => vfs.isDirty(p));
         // Always flush to disk
         const written = flushToDisk(vfs, dirty);
@@ -457,7 +499,7 @@ async function repl() {
             try {
               await commitToGitHub(vfs, ghClient, {
                 owner: ghConfig.owner, repo: ghConfig.repo,
-                branch: ghConfig.ref, message, pathPrefix: '/src/',
+                branch: branch ?? ghConfig.ref, message, pathPrefix: '/src/',
               }, (ev) => context.emit(ev));
             } catch (e) {
               context.emit({ type: 'progress', message: `GitHub push failed: ${e.message}` });

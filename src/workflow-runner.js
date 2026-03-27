@@ -106,6 +106,7 @@ export async function runWorkflowSteps(wf, wfName, vfs, state, deps, hooks = {})
     onStepVerifying    = () => {},
     onStepDone         = () => {},
     onStepSkipped      = () => {},
+    onStepBlocked      = () => {},
     onCheckpointUpdated = () => {},
     onComplete         = () => {},
     onUserMsg          = () => {},
@@ -161,8 +162,25 @@ export async function runWorkflowSteps(wf, wfName, vfs, state, deps, hooks = {})
 2. Call await context.commit('workflow: ${wfName} — step ${step.id} complete').
 3. context.emit({ type: 'done', message: 'Step ${step.id} complete' })`;
 
+    // Intercept blocked events emitted during this step
+    let stepBlockedReason = null;
+    const origEmit = state.context.emit;
+    state.context.emit = (ev) => {
+      if (ev.type === 'blocked') stepBlockedReason = ev.reason ?? 'blocked';
+      origEmit(ev);
+    };
+
     onUserMsg(turnPrompt);
     await runTurn(turnPrompt, state, deps);
+
+    state.context.emit = origEmit; // restore
+
+    // Halt workflow if step emitted blocked
+    if (stepBlockedReason) {
+      onStepBlocked(step.id, stepBlockedReason);
+      vfs.write(HISTORY_PATH, JSON.stringify(state.history));
+      return;
+    }
 
     // Continuation pass: verify and fill any gaps
     onStepVerifying(step.id);
@@ -173,6 +191,8 @@ export async function runWorkflowSteps(wf, wfName, vfs, state, deps, hooks = {})
       `context.emit({ type: 'done', message: 'Step ${step.id} verified' })`,
       state, deps
     );
+
+    state.context.emit = origEmit; // restore after continuation pass too
 
     // Re-read checkpoint (agent may have updated it)
     const updated = loadState(vfs);

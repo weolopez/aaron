@@ -1,0 +1,30 @@
+{
+  "name": "plan-implement-verify",
+  "description": "Plan an implementation, execute it, verify the outputs are real, then open a PR — halts before PR if verification fails",
+  "steps": [
+    {
+      "id": "init",
+      "skill": "init",
+      "prompt": "A new task is starting. First, check if /memory/project-notes.md already exists and is useful. If not, run the init skill to map the workspace: file counts, entry points, key modules, gaps. Write notes to /memory/project-notes.md. This context will be used by the planning step."
+    },
+    {
+      "id": "plan",
+      "skill": "code-planner",
+      "prompt": "Read /memory/project-notes.md for workspace context. Read any requirements or task description from /memory/ or /scratch/. Write a detailed implementation plan to /scratch/plan-implement-verify/plan.md. The plan MUST include: (1) exact /src/ file paths to create, (2) exact /src/ file paths to modify with description of change, (3) implementation order, (4) success criteria. Do NOT write any /src/ files — planning only. If the task is unclear or missing, emit blocked."
+    },
+    {
+      "id": "implement",
+      "prompt": "Read /scratch/plan-implement-verify/plan.md. Implement every file listed under 'files to create' and every change listed under 'files to modify'. Write all files to their exact /src/ paths. Do not skip any listed file. Emit file_write for each file. Emit a metric with the total count of files written. When all files are written, emit done."
+    },
+    {
+      "id": "verify",
+      "skill": "verify",
+      "prompt": "Verify the implementation step completed correctly. Read /scratch/plan-implement-verify/plan.md to know what was claimed. Check every file listed in 'files to create' and 'files to modify' against the current VFS state. Check for missing files, empty files, and stub placeholders. Write a verification report to /scratch/plan-implement-verify/verification.md. If all checks pass, emit done. If any check fails, emit blocked with a clear reason — do NOT proceed."
+    },
+    {
+      "id": "open-pr",
+      "skill": "github-pr",
+      "prompt": "Verification passed. Read /scratch/plan-implement-verify/plan.md and /scratch/plan-implement-verify/verification.md. Create a feature branch named feat/piv-<timestamp> (use Date.now()). Commit all dirty /src/ files to that branch. Open a pull request: title from the plan goal, body with implementation summary and verification results, test plan checklist. Emit the PR URL as a result."
+    }
+  ]
+}
