@@ -18,7 +18,7 @@ import { stdin as input, stdout as output, env } from 'node:process';
 import { createVFS, execute, extractCode } from './src/agent-core.js';
 import { runTurn, buildSkillIndex } from './src/agent-loop.js';
 import { runRSI, runSkillRSI } from './src/agent-rsi.js';
-import { createGitHubClient, initFromGitHub, commitToGitHub, parseGitHubRepo } from './src/github.js';
+import { createGitHubClient, initFromGitHub, syncFromGitHub, commitToGitHub, parseGitHubRepo } from './src/github.js';
 import { loadSession, saveSession, clearSession, listSessions, migrateLegacySession } from './src/session.js';
 import { snapshotWorkspace, restoreWorkspace, getWorkspaceId, getSelfWorkspaceId, isWorkspacePath } from './src/workspace.js';
 import { buildCreatePrompt, buildImprovePrompt, listWorkflows, runWorkflowSteps, runWorkflowRSI, buildWorkflowScorer } from './src/workflow-runner.js';
@@ -428,10 +428,14 @@ async function repl() {
 
     if (answer === 'y' || answer === 'yes') {
       vfs = createVFS();
-      // Restore VFS contents
+      // Restore VFS contents — entry is either a plain string (old sessions)
+      // or { content, sha, dirty } (new sessions with SHA metadata)
       if (savedSession.vfs) {
-        for (const [path, content] of Object.entries(savedSession.vfs)) {
+        for (const [path, entry] of Object.entries(savedSession.vfs)) {
+          const content = typeof entry === 'string' ? entry : entry.content;
+          const sha = typeof entry === 'string' ? null : entry.sha;
           vfs.write(path, content);
+          if (sha) { vfs.setSHA(path, sha); vfs.markClean(path); }
         }
       }
       hydrateHarness(vfs);
@@ -493,8 +497,13 @@ async function repl() {
   if (ghClient && ghConfig) {
     output.write(c('cyan', `  github`) + c('gray', ` → ${ghConfig.owner}/${ghConfig.repo}@${ghConfig.ref}\n`));
     try {
-      const result = await initFromGitHub(ghConfig, vfs, ghClient, (ev) => ui.emitEvent(ev));
-      output.write(c('green', `  ✓ `) + c('gray', `${result.files} files hydrated from GitHub`) + '\n');
+      // Use differential sync when resuming a session (SHAs in VFS cache), full fetch otherwise
+      const hydrateFn = (state != null) ? syncFromGitHub : initFromGitHub;
+      const result = await hydrateFn(ghConfig, vfs, ghClient, (ev) => ui.emitEvent(ev));
+      const detail = result.cached != null
+        ? `${result.cached} cached, ${result.updated} updated`
+        : `${result.files} files hydrated`;
+      output.write(c('green', `  ✓ `) + c('gray', `${detail} from GitHub`) + '\n');
     } catch (e) {
       output.write(c('red', `  ✕ GitHub hydration failed: ${e.message}\n`));
     }

@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>agent/harness</title>
+<link rel="icon" href="data:,">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;1,400&family=Syne:wght@700;800&display=swap" rel="stylesheet">
 <style>
@@ -666,7 +667,7 @@ textarea#input::placeholder { color: var(--dim); }
 
   <div class="gh-bar">
     <span style="color:var(--dim);">Anthropic</span>
-    <input class="gh-apikey" id="api-key" type="password" placeholder="sk-ant-… API key" />
+    <input class="gh-apikey" id="api-key" type="password" placeholder="sk-ant-… or sk-or-… API key" />
     <button id="api-key-set">set key</button>
     <span style="color:var(--border2);margin:0 4px;">│</span>
     <span style="color:var(--dim);">GitHub</span>
@@ -730,7 +731,7 @@ textarea#input::placeholder { color: var(--dim); }
 
 import { createVFS, execute, extractCode } from './src/agent-core.js';
 import { runTurn, buildSkillIndex } from './src/agent-loop.js';
-import { createGitHubClient, initFromGitHub, commitToGitHub, parseGitHubRepo } from './src/github.js';
+import { createGitHubClient, initFromGitHub, syncFromGitHub, commitToGitHub, parseGitHubRepo } from './src/github.js';
 import { loadSession, saveSession, clearSession } from './src/session.js';
 import { buildCreatePrompt, buildImprovePrompt, listWorkflows, runWorkflowSteps, runWorkflowRSI, buildWorkflowScorer } from './src/workflow-runner.js';
 import { getLLMClient } from './src/llm-client.js';
@@ -742,8 +743,16 @@ import { getLLMClient } from './src/llm-client.js';
 const MODEL = 'claude-sonnet-4-20250514';
 
 // ── API KEY (stored for llm-client.js to read) ──
+// Auto-detects OpenRouter keys (sk-or-...) vs Anthropic keys (sk-ant-...)
 function storeApiKey(apiKey) {
-  if (apiKey) localStorage.setItem('ANTHROPIC_API_KEY', apiKey);
+  if (!apiKey) return;
+  if (apiKey.startsWith('sk-or-')) {
+    localStorage.setItem('OPENROUTER_API_KEY', apiKey);
+    localStorage.removeItem('ANTHROPIC_API_KEY');
+  } else {
+    localStorage.setItem('ANTHROPIC_API_KEY', apiKey);
+    localStorage.removeItem('OPENROUTER_API_KEY');
+  }
 }
 
 // ════════════════════════════════════════════════════
@@ -1020,20 +1029,22 @@ async function hydrateHarness(vfs) {
 // ════════════════════════════════════════════════════
 
 const vfs = createVFS();
+const BROWSER_WORKSPACE_ID = 'browser';
 
 // ── API key UI ──
 const apiKeyInput  = document.getElementById('api-key');
 const apiKeySetBtn = document.getElementById('api-key-set');
 
-// Restore saved API key
-const savedApiKey = localStorage.getItem('aaron-apikey') || '';
+// Restore saved API key (OpenRouter takes priority for display)
+const savedApiKey = localStorage.getItem('OPENROUTER_API_KEY') || localStorage.getItem('ANTHROPIC_API_KEY') || '';
 if (savedApiKey) apiKeyInput.value = savedApiKey;
 
 function applyApiKey() {
   const key = apiKeyInput.value.trim();
   if (!key) return;
   storeApiKey(key);
-  ui.addSysMsg('API key stored. Will be used for next request.');
+  const provider = key.startsWith('sk-or-') ? 'OpenRouter (CORS-friendly)' : 'Anthropic (requires proxy on localhost)';
+  ui.addSysMsg(`API key stored. Provider: ${provider}`);
 }
 
 apiKeySetBtn.addEventListener('click', applyApiKey);
@@ -1127,7 +1138,14 @@ const agentState = {
     fetch: (...args) => fetch(...args),
     emit: (ev) => ui.emitEvent(ev),
     approve: (msg) => window.confirm(`⚠️ Agent Authorization Required\n\n${msg}\n\nAllow execution?`),
-    env: {},
+    env: {
+      // Route API calls through the local dev server proxy to avoid browser CORS restrictions.
+      // The proxy forwards requests to api.anthropic.com server-side.
+      // When deployed outside localhost, calls go directly to Anthropic.
+      anthropicApiUrl: ['127.0.0.1', 'localhost'].includes(location.hostname)
+        ? `${location.origin}/v1/messages`
+        : 'https://api.anthropic.com/v1/messages',
+    },
     github: null,
     async commit(message = 'commit') {
       const dirty = vfs.list().filter(p => vfs.isDirty(p));
@@ -1157,10 +1175,14 @@ const deps = { execute, extractCode, ui, runTurn };
 
 // Hydrate harness files into VFS, then auto-connect GitHub if credentials are saved
 hydrateHarness(vfs).then(async () => {
-  const savedSession = await loadSession();
+  const savedSession = await loadSession(BROWSER_WORKSPACE_ID);
   if (savedSession) {
-    for (const [path, content] of Object.entries(savedSession.vfs || {})) {
+    for (const [path, entry] of Object.entries(savedSession.vfs || {})) {
+      // entry is either a plain string (old sessions) or { content, sha, dirty } (new sessions)
+      const content = typeof entry === 'string' ? entry : entry.content;
+      const sha = typeof entry === 'string' ? null : entry.sha;
       vfs.write(path, content);
+      if (sha) { vfs.setSHA(path, sha); vfs.markClean(path); }
     }
     agentState.history = savedSession.state?.history || [];
     agentState.turn = savedSession.state?.turn || 0;
@@ -1171,10 +1193,45 @@ hydrateHarness(vfs).then(async () => {
 
   const saved = (() => { try { return JSON.parse(localStorage.getItem('aaron-github') || 'null'); } catch { return null; } })();
   if (saved?.repo && saved?.token) {
-    // Auto-connect to GitHub — loads latest skills, workflows, memory from repo
-    ghRepoInput.value = saved.repo;
-    ghTokenInput.value = saved.token;
-    await ghConnect();
+    const cfg = parseGitHubRepo(saved.repo);
+    if (cfg) {
+      ghConfig = cfg;
+      ghClient = createGitHubClient({ token: saved.token });
+      ghRepoInput.value = saved.repo;
+      ghTokenInput.value = saved.token;
+      ghStatusEl.textContent = `connecting to ${cfg.owner}/${cfg.repo}...`;
+
+      try {
+        // Use differential sync when a SHA cache exists, full fetch otherwise.
+        // Pass SHA cache directly — VFS is empty at startup so vfs.setSHA() would be a no-op.
+        const shaCache = (() => { try { return JSON.parse(localStorage.getItem('aaron-sha-cache') || '{}'); } catch { return {}; } })();
+        const hasSHACache = Object.keys(shaCache).length > 0;
+        const hydrateFn = hasSHACache ? syncFromGitHub : initFromGitHub;
+        const result = await hydrateFn(cfg, vfs, ghClient, (ev) => ui.emitEvent(ev), shaCache);
+        ghStatusEl.textContent = `${cfg.owner}/${cfg.repo}@${cfg.ref} (${result.files} files)`;
+        ghStatusEl.classList.add('connected');
+        ghPushBtn.disabled = false;
+        agentState.context.github = { owner: cfg.owner, repo: cfg.repo, ref: cfg.ref };
+        ui.refreshVFS(vfs);
+        const msg = hasSHACache
+          ? `GitHub synced: ${result.cached ?? result.files} cached, ${result.updated ?? 0} updated from ${cfg.owner}/${cfg.repo}@${cfg.ref}`
+          : `GitHub connected: ${result.files} files loaded from ${cfg.owner}/${cfg.repo}@${cfg.ref}`;
+        ui.addSysMsg(msg);
+
+        // Persist SHA-only cache (few KB) for next reload — full VFS content is too large for localStorage
+        try {
+          const snap = vfs.snapshot ? vfs.snapshot() : {};
+          const shaMap = {};
+          for (const [p, meta] of Object.entries(snap)) { if (meta?.sha) shaMap[p] = meta.sha; }
+          localStorage.setItem('aaron-sha-cache', JSON.stringify(shaMap));
+        } catch { /* quota exceeded — cache unavailable */ }
+      } catch (e) {
+        ghStatusEl.textContent = `error: ${e.message}`;
+        ghStatusEl.classList.remove('connected');
+        ghClient = null; ghConfig = null;
+        ui.addSysMsg(`GitHub connection failed: ${e.message}`);
+      }
+    }
     // Rebuild skill index after GitHub hydration
     agentState.context.skillIndex = buildSkillIndex(vfs);
   }
@@ -1292,7 +1349,7 @@ async function handleSend() {
         return;
       }
       ui.addSysMsg(`Workflow RSI: ${wfRsiName} — ${budget} experiments (LLM scoring)…`);
-      const scorer = buildWorkflowScorer(getLLMClient());
+      const scorer = buildWorkflowScorer(getLLMClient({ apiUrl: agentState.context.env.anthropicApiUrl }));
       const results = await runWorkflowRSI({ wfName: wfRsiName, budget, state: agentState, deps, scorer });
       const kept = results.filter(r => r.kept).length;
       ui.addSysMsg(`Workflow RSI complete: ${kept}/${results.length} experiments kept`);
@@ -1332,7 +1389,13 @@ async function handleSend() {
   // ── Normal agent turn ─────────────────────────────
   ui.addUserMsg(msg);
   await runTurn(msg, agentState, deps);
-  await saveSession(agentState, vfs);
+  // Save only dirty VFS entries (agent-written files) — GitHub-fetched files are too large for localStorage
+  const dirtyVfs = { snapshot: () => {
+    const snap = {};
+    for (const p of vfs.list()) { if (vfs.isDirty(p)) { const s = vfs.snapshot(); if (s[p]) snap[p] = s[p]; } }
+    return snap;
+  }};
+  await saveSession(BROWSER_WORKSPACE_ID, agentState, dirtyVfs);
 }
 
 sendBtn.addEventListener('click', handleSend);

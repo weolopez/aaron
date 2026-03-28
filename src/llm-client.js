@@ -124,6 +124,7 @@ export function createAnthropicClient({
           'Content-Type': 'application/json',
           'x-api-key': resolvedApiKey,
           'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-allow-browser': 'true',
           ...headers,
         },
         body: JSON.stringify({ model, max_tokens: 16384, system, messages }),
@@ -574,6 +575,49 @@ export function createAskArchitectClient({
 }
 
 // ════════════════════════════════════════════════════
+// OPENROUTER CLIENT (CORS-friendly for browser use)
+// ════════════════════════════════════════════════════
+
+export function createOpenRouterClient({
+  model = 'anthropic/claude-sonnet-4-6',
+  apiUrl = 'https://openrouter.ai/api/v1/chat/completions',
+  apiKey = null,
+} = {}) {
+  const resolvedApiKey = apiKey ?? getToken('OPENROUTER_API_KEY');
+
+  return {
+    model,
+    provider: 'openrouter',
+    async call(messages, system) {
+      if (!resolvedApiKey) {
+        throw new Error('OpenRouter API key is not set. Configure OPENROUTER_API_KEY.');
+      }
+      // OpenRouter uses OpenAI format: system is a message, not a separate field
+      const allMessages = system
+        ? [{ role: 'system', content: system }, ...messages]
+        : messages;
+
+      const res = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${resolvedApiKey}`,
+        },
+        body: JSON.stringify({ model, max_tokens: 16384, messages: allMessages }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error?.message ?? `LLM API error ${res.status}`);
+      }
+      const data = await res.json();
+      // Convert OpenAI response format to Anthropic format for compatibility
+      const text = data.choices?.[0]?.message?.content ?? '';
+      return { content: [{ type: 'text', text }] };
+    },
+  };
+}
+
+// ════════════════════════════════════════════════════
 // FACTORY: Get LLM Client
 // ════════════════════════════════════════════════════
 
@@ -582,16 +626,27 @@ export function createAskArchitectClient({
  * Reads provider and tokens from storage.
  *
  * Options (from localStorage/env):
- *   - LLM_PROVIDER: 'anthropic' | 'askarchitect'
- *   - ANTHROPIC_API_KEY: API key for Anthropic
- *   - ANTHROPIC_MODEL: model name (default: 'claude-haiku-4-5')
- *   - ASKARCHITECT_SESSION: cached session cookie
+ *   - LLM_PROVIDER: 'anthropic' | 'openrouter' | 'askarchitect'
+ *   - ANTHROPIC_API_KEY: API key for Anthropic (direct, requires proxy in browser)
+ *   - OPENROUTER_API_KEY: API key for OpenRouter (CORS-friendly, works in browser)
+ *   - ANTHROPIC_MODEL: model name override
+ *
+ * Auto-detection order: explicit provider → OPENROUTER_API_KEY → ANTHROPIC_API_KEY → askarchitect
  */
 export function getLLMClient(options = {}) {
   const configuredProvider = options.provider ?? getToken('LLM_PROVIDER');
-  const provider = configuredProvider ?? (getToken('ANTHROPIC_API_KEY') ? 'anthropic' : 'askarchitect');
+  const hasOpenRouter = !!getToken('OPENROUTER_API_KEY');
+  const hasAnthropic = !!getToken('ANTHROPIC_API_KEY');
+  const provider = configuredProvider ?? (hasOpenRouter ? 'openrouter' : hasAnthropic ? 'anthropic' : 'askarchitect');
 
   switch (provider) {
+    case 'openrouter':
+      return createOpenRouterClient({
+        model: options.model ?? getToken('ANTHROPIC_MODEL') ?? 'anthropic/claude-sonnet-4-6',
+        apiKey: options.apiKey,
+        // Note: do NOT spread ...options here — apiUrl from options targets Anthropic, not OpenRouter
+      });
+
     case 'anthropic':
       return createAnthropicClient({
         model: options.model ?? getToken('ANTHROPIC_MODEL') ?? 'claude-sonnet-4-6',

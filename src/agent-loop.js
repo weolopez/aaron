@@ -187,7 +187,9 @@ export const MAX_RETRIES = 3;
  *   ui.onTurnComplete(turn, vfs) — refresh display after successful turn
  */
 export async function runTurn(userMessage, state, { execute, extractCode, ui }) {
-  const llm = getLLMClient();
+  const llm = getLLMClient({
+    apiUrl: state.context?.env?.anthropicApiUrl ?? 'https://api.anthropic.com/v1/messages'
+  });
   state.history.push({ role: 'user', content: userMessage });
   ui.setStatus('thinking');
 

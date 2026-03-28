@@ -93,7 +93,9 @@ export async function saveSession(workspaceId, state, vfs) {
       history: state.history,
       turn: state.turn || 0,
     },
-    vfs: vfs?.dump ? vfs.dump() : {},
+    // Use snapshot() to persist SHAs alongside content for differential sync on resume.
+    // Falls back to dump() (content-only) for VFS implementations without snapshot().
+    vfs: vfs?.snapshot ? vfs.snapshot() : (vfs?.dump ? vfs.dump() : {}),
   };
 
   try {
