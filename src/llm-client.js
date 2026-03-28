@@ -579,7 +579,7 @@ export function createAskArchitectClient({
 // ════════════════════════════════════════════════════
 
 export function createOpenRouterClient({
-  model = 'anthropic/claude-sonnet-4-6',
+  model = 'nvidia/nemotron-3-super-120b-a12b:free',
   apiUrl = 'https://openrouter.ai/api/v1/chat/completions',
   apiKey = null,
 } = {}) {
@@ -642,7 +642,7 @@ export function getLLMClient(options = {}) {
   switch (provider) {
     case 'openrouter':
       return createOpenRouterClient({
-        model: options.model ?? getToken('ANTHROPIC_MODEL') ?? 'anthropic/claude-sonnet-4-6',
+        model: options.model ?? getToken('ANTHROPIC_MODEL') ?? 'nvidia/nemotron-3-super-120b-a12b:free',
         apiKey: options.apiKey,
         // Note: do NOT spread ...options here — apiUrl from options targets Anthropic, not OpenRouter
       });
