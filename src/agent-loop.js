@@ -195,9 +195,21 @@ export async function runTurn(userMessage, state, { execute, extractCode, ui }) 
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
-      const systemPrompt = state.context.skillIndex
-        ? SYSTEM + state.context.skillIndex
-        : SYSTEM;
+      // Build workspace context block (repo + VFS summary)
+      let workspaceContext = '';
+      if (state.context.github) {
+        const { owner, repo, ref } = state.context.github;
+        workspaceContext += `\nCURRENT WORKSPACE: ${owner}/${repo}@${ref}\n`;
+        workspaceContext += `  Repo files are mounted at /src/ in the VFS.\n`;
+        workspaceContext += `  Use context.vfs.list() to explore, context.vfs.read('/src/...') to read files.\n`;
+      }
+      const vfsPaths = state.context.vfs?.list?.() ?? [];
+      if (vfsPaths.length > 0) {
+        const dirs = [...new Set(vfsPaths.map(p => p.split('/').slice(0, 3).join('/')))].slice(0, 20);
+        workspaceContext += `  VFS top-level paths (${vfsPaths.length} total): ${dirs.join(', ')}\n`;
+      }
+
+      const systemPrompt = SYSTEM + workspaceContext + (state.context.skillIndex ?? '');
       const data = await llm.call(state.history, systemPrompt);
       const { code } = extractCode(data);
 

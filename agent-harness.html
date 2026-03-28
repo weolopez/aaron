@@ -66,7 +66,7 @@ html, body {
 /* ── LAYOUT ─────────────────────────────────────── */
 #app {
   display: grid;
-  grid-template-rows: 42px auto 1fr;
+  grid-template-rows: 42px auto auto 1fr;
   height: 100vh;
 }
 
@@ -634,6 +634,21 @@ textarea#input::placeholder { color: var(--dim); }
   border-bottom: 1px solid var(--border);
   font-size: 11px;
 }
+.scenarios-bar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 12px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  flex-wrap: wrap;
+}
+.scenarios-label { color: var(--dim); letter-spacing: 0.06em; }
+.scenario-btn {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 4px;
+  color: var(--dim2); font-size: 11px; font-family: inherit;
+  padding: 3px 10px; cursor: pointer; transition: color .1s, border-color .1s, background .1s;
+}
+.scenario-btn:hover { color: var(--text); border-color: var(--amber-brd); background: var(--bg3); }
 .gh-bar input {
   background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
   color: var(--text); padding: 3px 8px; font-size: 11px; font-family: inherit;
@@ -676,6 +691,15 @@ textarea#input::placeholder { color: var(--dim); }
     <button id="gh-connect">connect</button>
     <button id="gh-push" disabled>push</button>
     <span class="gh-status" id="gh-status">disconnected</span>
+  </div>
+
+  <!-- SCENARIOS bar -->
+  <div class="scenarios-bar" id="scenarios-bar">
+    <span class="scenarios-label">Scenarios:</span>
+    <button class="scenario-btn" data-scenario="init">🔍 Init Workspace</button>
+    <button class="scenario-btn" data-scenario="bugfix">🐛 Bug Fix → PR</button>
+    <button class="scenario-btn" data-scenario="feature">✨ Feature → PR</button>
+    <button class="scenario-btn" data-scenario="summarize">📋 Summarize Repo</button>
   </div>
 
   <main>
@@ -1399,6 +1423,49 @@ async function handleSend() {
 }
 
 sendBtn.addEventListener('click', handleSend);
+
+// ── Scenario buttons ──────────────────────────────────────────────────
+const SCENARIO_PROMPTS = {
+  init: `Use the init skill to explore this workspace.
+List all files in /src/ using context.vfs.list(), read key files, and write a structured summary to /memory/project-notes.md covering:
+- Project type and purpose
+- File structure and src/ file count
+- Missing tests (look for test/ directory)
+- Any ADR, docs, or requirements files`,
+
+  bugfix: `Run the bug-fix workflow (:workflow bug-fix) to diagnose and fix any issues in this repo.
+If no workflow exists, do this manually:
+1. Read src/ files to understand the codebase
+2. Look for any obvious bugs, off-by-one errors, or wrong defaults
+3. Write a diagnosis to /scratch/bug-fix/diagnosis.md
+4. Apply the fix to the affected file in /src/
+5. Commit the fix and open a PR`,
+
+  feature: `Run the plan-implement-verify workflow (:workflow plan-implement-verify) to add a new feature.
+If no workflow exists, read /memory/task.md for the feature request, then:
+1. Plan the implementation and write to /scratch/plan/plan.md
+2. Implement the feature in /src/
+3. Verify the implementation is real (not stubs)
+4. Commit and open a PR`,
+
+  summarize: `Summarize this GitHub repo. Use context.vfs.list() to see all files, then:
+1. Read the README and key source files from /src/
+2. Identify the project type, main purpose, and architecture
+3. List the most important files and what they do
+4. Write a clear summary to /memory/project-notes.md
+Emit a done event with the summary when finished.`,
+};
+
+document.querySelectorAll('.scenario-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const prompt = SCENARIO_PROMPTS[btn.dataset.scenario];
+    if (!prompt) return;
+    inputEl.value = prompt;
+    inputEl.style.height = 'auto';
+    inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + 'px';
+    inputEl.focus();
+  });
+});
 
 // Keyboard shortcut
 inputEl.addEventListener('keydown', e => {
