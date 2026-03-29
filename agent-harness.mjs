@@ -21,8 +21,10 @@ import { runRSI, runSkillRSI } from './src/agent-rsi.js';
 import { createGitHubClient, initFromGitHub, commitToGitHub, parseGitHubRepo } from './src/github.js';
 import { loadSession, saveSession, clearSession, listSessions, migrateLegacySession } from './src/session.js';
 import { snapshotWorkspace, restoreWorkspace, getWorkspaceId, getSelfWorkspaceId, isWorkspacePath } from './src/workspace.js';
-import { buildCreatePrompt, buildImprovePrompt, listWorkflows, runWorkflowSteps, runWorkflowRSI, buildWorkflowScorer } from './src/workflow-runner.js';
+import { buildCreatePrompt, buildImprovePrompt, runWorkflowSteps } from './src/workflow-runner.js';
 import { getLLMClient } from './src/llm-client.js';
+import { dispatchWorkflowCommand } from './src/commands.js';
+import { createCommitFn } from './src/commit.js';
 
 // ════════════════════════════════════════════════════
 // .env loader (zero deps)
@@ -446,27 +448,13 @@ async function repl() {
         skillIndex,
         workspaceId: currentWorkspaceId,
         github: ghClient ? makeGitHubHelper(ghClient, ghConfig) : null,
-        async commit(message = 'commit', branch) {
-          const dirty = vfs.list().filter(p => vfs.isDirty(p));
-          const written = flushToDisk(vfs, dirty);
-          writeManifest();
-          if (ghClient && ghConfig) {
-            const srcDirty = dirty.filter(p => p.startsWith('/src/'));
-            if (srcDirty.length > 0) {
-              try {
-                await commitToGitHub(vfs, ghClient, {
-                  owner: ghConfig.owner, repo: ghConfig.repo,
-                  branch: branch ?? ghConfig.ref, message, pathPrefix: '/src/',
-                }, (ev) => context.emit(ev));
-              } catch { /* logged by commitToGitHub */ }
-            }
-          }
-          for (const p of dirty) vfs.markClean(p);
-          if (written.length > 0) {
-            context.emit({ type: 'progress', message: `flushed ${written.length} files to disk` });
-          }
-          return dirty;
-        },
+        commit: createCommitFn({
+          vfs,
+          getGitHub: () => ghClient && ghConfig ? { client: ghClient, config: ghConfig } : null,
+          commitToGitHub,
+          emit: (ev) => ui.emitEvent(ev),
+          onFlush: (v, dirty) => { flushToDisk(v, dirty); writeManifest(); },
+        }),
       };
 
       state = {
@@ -503,41 +491,23 @@ async function repl() {
   if (!state) {
     const skillIndex = buildSkillIndex(vfs);
 
+    const emitFn = (ev) => ui.emitEvent(ev);
     const context = {
       vfs,
       fetch: (...args) => fetch(...args),
-      emit:  (ev) => ui.emitEvent(ev),
+      emit:  emitFn,
       approve: () => true,  // CLI: auto-approve risky patterns (user has shell access)
       env:   {},
       skillIndex,
       workspaceId: getSelfWorkspaceId(),
       github: ghClient ? makeGitHubHelper(ghClient, ghConfig) : null,
-      async commit(message = 'commit', branch) {
-        const dirty = vfs.list().filter(p => vfs.isDirty(p));
-        // Always flush to disk
-        const written = flushToDisk(vfs, dirty);
-        writeManifest();
-        // Also push to GitHub if connected and /src/ files are dirty
-        if (ghClient && ghConfig) {
-          const srcDirty = dirty.filter(p => p.startsWith('/src/'));
-          if (srcDirty.length > 0) {
-            try {
-              await commitToGitHub(vfs, ghClient, {
-                owner: ghConfig.owner, repo: ghConfig.repo,
-                branch: branch ?? ghConfig.ref, message, pathPrefix: '/src/',
-              }, (ev) => context.emit(ev));
-            } catch (e) {
-              context.emit({ type: 'progress', message: `GitHub push failed: ${e.message}` });
-            }
-          }
-        }
-        for (const p of dirty) vfs.markClean(p);
-        context.emit({ type: 'experiment', id: String(Date.now()), kept: true, reason: message });
-        if (written.length > 0) {
-          context.emit({ type: 'progress', message: `flushed ${written.length} files to disk` });
-        }
-        return dirty;
-      },
+      commit: createCommitFn({
+        vfs,
+        getGitHub: () => ghClient && ghConfig ? { client: ghClient, config: ghConfig } : null,
+        commitToGitHub,
+        emit: emitFn,
+        onFlush: (v, dirty) => { flushToDisk(v, dirty); writeManifest(); },
+      }),
     };
 
     state = {
@@ -736,20 +706,61 @@ async function repl() {
 
       const mutatePrompt = existing
         ? [
-            `Read /skills/${skillName}/SKILL.md — this is a skill that provides instructions for the agent.`,
-            `Now analyze how an agent would approach this eval task: "${evalPrompt}"`,
-            `Improve the skill instructions to help the agent complete this type of task more reliably.`,
-            `Keep the YAML frontmatter (name, description) and agentskills.io format.`,
-            `Write the improved version back to /skills/${skillName}/SKILL.md.`,
-            'Explain what you changed and why in a progress emit before the done emit.',
+            `Read /skills/${skillName}/SKILL.md — this is a skill that provides agent instructions.`,
+            '',
+            `The eval task is: "${evalPrompt}"`,
+            '',
+            'To improve effectively:',
+            '1. Re-read the skill to understand its current steps and code blocks.',
+            '2. Read /memory/experiments.jsonl — find the most recent experiment for this skill and check why it scored lower than expected.',
+            '3. Read any artifacts written under /scratch/ — look for thin content, missing files, or incomplete analysis.',
+            '4. Identify the ONE weakest step: vague instructions, missing code snippet, wrong output path, or missing edge-case handling.',
+            '5. Strengthen that step: add or sharpen the JS code block, clarify the emit protocol, fix the output path.',
+            `6. Rules: keep YAML frontmatter unchanged; every step must have a \`\`\`js block; every step must call context.emit({type:"progress",...}); final step must call context.emit({type:"done",...}).`,
+            `7. Write the improved version to /skills/${skillName}/SKILL.md.`,
+            '8. Emit a progress event describing exactly what you changed and why, then emit done.',
           ].join('\n')
         : [
-            `Create a new skill at /skills/${skillName}/SKILL.md that would help the agent with this type of task: "${evalPrompt}"`,
-            'Follow the agentskills.io SKILL.md format:',
-            '  - YAML frontmatter with name and description (---\\nname: ...\\ndescription: ...\\n---)',
-            '  - Markdown body with approach, templates, checklists',
-            `  - name in frontmatter must be: ${skillName}`,
-            'Write the file, then explain what you created in a progress emit before the done emit.',
+            `Create a new skill at /skills/${skillName}/SKILL.md that teaches the agent to: "${evalPrompt}"`,
+            '',
+            'FORMAT — read this reference skill first to match its structure:',
+            `  const ref = context.vfs.read('/skills/bug-fixer/SKILL.md');`,
+            `  context.emit({type:'progress', message:'Format reference loaded: ' + (ref ? ref.split('\\n').length + ' lines' : 'not found')});`,
+            '',
+            'REQUIRED STRUCTURE:',
+            '  ---',
+            `  name: ${skillName}`,
+            '  description: <one sentence — when to use this skill>',
+            '  ---',
+            '',
+            `  # ${skillName}`,
+            '  <2-3 sentence overview>',
+            '',
+            '  ## When to use',
+            '  - <condition 1>',
+            '  - <condition 2>',
+            '',
+            '  ## Steps',
+            '  Each step MUST have:',
+            '    ### N. <Step title>',
+            '    <prose>',
+            '    ```js',
+            '    context.emit({type:"progress", message:"Step N: ..."});',
+            '    // read/analyze/write',
+            `    context.emit({type:"file_write", path:"/scratch/${skillName}/output.md"});`,
+            '    ```',
+            '',
+            '  FINAL step MUST end with:',
+            '    context.emit({type:"result", value:{...summary}});',
+            '    context.emit({type:"done", message:"<one-liner>"});',
+            '',
+            'RULES:',
+            `  - Write outputs to /scratch/${skillName}/`,
+            '  - Read inputs from /memory/ or /scratch/ — check vfs.list() first',
+            '  - Code blocks: valid JS only (no TypeScript, no imports — use context.* directly)',
+            '  - Include Anti-patterns section',
+            '',
+            `Write the complete SKILL.md to /skills/${skillName}/SKILL.md, then emit progress describing what you built, then emit done.`,
           ].join('\n');
 
       output.write('\n' + c('cyan', `  Skill RSI: ${skillName} (${existing ? 'improving' : 'creating'})`) + '\n');
@@ -785,115 +796,53 @@ async function repl() {
     }
 
     if (msg === ':workflow' || msg.startsWith(':workflow ')) {
-      const args = msg.slice(10).trim();
-
-      // ── :workflow (list) ──
-      if (!args || args === 'list') {
-        const workflows = listWorkflows(vfs);
-        if (workflows.length === 0) {
-          output.write(c('gray', '  No workflows yet.\n'));
-          output.write(c('gray', '  Create one: :workflow create <name> <goal>\n'));
-        } else {
-          output.write('\n' + c('cyan', '  Workflows:') + '\n');
-          for (const wf of workflows) {
-            const statusStr = wf.status === 'complete'     ? c('green', 'complete')
-                            : wf.status === 'in-progress'  ? c('amber', `step ${wf.currentStep}`)
-                            : c('gray', 'not started');
-            output.write(c('gray', `    ${wf.name}`) + '  ' + statusStr + '\n');
-            if (wf.description) output.write(c('gray', `      ${wf.description}\n`));
-          }
-          output.write(c('gray', '\n  :workflow <name>                    — run\n'));
-          output.write(c('gray', '  :workflow create <name> <goal>      — create new\n'));
-          output.write(c('gray', '  :workflow improve <name> <feedback> — revise steps\n'));
-          output.write(c('gray', '  :workflow rsi <name> [budget]       — iterate definition\n'));
-        }
-        output.write('\n');
-        continue;
-      }
-
-      // ── :workflow create <name> <goal> ──
-      if (args.startsWith('create ')) {
-        const rest = args.slice(7).trim();
-        const spaceIdx = rest.indexOf(' ');
-        if (spaceIdx === -1) {
-          output.write(c('red', '  Usage: :workflow create <name> <goal description>\n'));
-          continue;
-        }
-        const wfName = rest.slice(0, spaceIdx);
-        const goal = rest.slice(spaceIdx + 1).trim();
-        ui.user(`:workflow create ${wfName} ${goal}`);
-        await runTurn(buildCreatePrompt(wfName, goal), state, deps);
-        continue;
-      }
-
-      // ── :workflow improve <name> <feedback> ──
-      if (args.startsWith('improve ')) {
-        const rest = args.slice(8).trim();
-        const spaceIdx = rest.indexOf(' ');
-        if (spaceIdx === -1) {
-          output.write(c('red', '  Usage: :workflow improve <name> <feedback>\n'));
-          continue;
-        }
-        const wfName = rest.slice(0, spaceIdx);
-        const feedback = rest.slice(spaceIdx + 1).trim();
-        if (!vfs.read(`/workflows/${wfName}.json`)) {
-          output.write(c('red', `  Workflow "${wfName}" not found.\n`));
-          output.write(c('gray', `  Create it first: :workflow create ${wfName} <goal>\n`));
-          continue;
-        }
-        ui.user(`:workflow improve ${wfName} "${feedback}"`);
-        await runTurn(buildImprovePrompt(wfName, feedback), state, deps);
-        continue;
-      }
-
-      // ── :workflow rsi <name> [budget] ──
-      if (args.startsWith('rsi ')) {
-        const rest = args.slice(4).trim();
-        const parts = rest.split(/\s+/);
-        const wfRsiName = parts[0];
-        const budget = parseInt(parts[1], 10) || 3;
-        if (!wfRsiName) { output.write(c('red', '  Usage: :workflow rsi <name> [budget]\n')); continue; }
-        if (!vfs.read(`/workflows/${wfRsiName}.json`)) {
-          output.write(c('red', `  Workflow "${wfRsiName}" not found.\n`));
-          output.write(c('gray', `  Create it first: :workflow create ${wfRsiName} <goal>\n`));
-          continue;
-        }
-        output.write('\n' + c('cyan', `  Workflow RSI: ${wfRsiName} (${budget} experiments, LLM scoring enabled)`) + '\n');
-        const scorer = buildWorkflowScorer(getLLMClient());
-        const results = await runWorkflowRSI({ wfName: wfRsiName, budget, state, deps, log: rsiLog, scorer });
-        const kept = results.filter(r => r.kept).length;
-        output.write('\n' + c('cyan', `  Workflow RSI complete: ${kept}/${results.length} experiments kept`) + '\n');
-        const journal = vfs.read('/memory/experiments.jsonl');
-        if (journal) output.write(c('gray', `  experiments.jsonl: ${journal.split('\n').filter(Boolean).length} entries\n`));
-        ui.hr();
-        continue;
-      }
-
-      // ── :workflow <name> — run or resume ──
-      const wfName = args;
-      const wfRaw = vfs.read(`/workflows/${wfName}.json`);
-      if (!wfRaw) {
-        output.write(c('red', `  Workflow "${wfName}" not found.\n`));
-        output.write(c('gray', `  Create it: :workflow create ${wfName} <goal description>\n`));
-        continue;
-      }
-      let wf;
-      try { wf = JSON.parse(wfRaw); }
-      catch { output.write(c('red', `  Invalid workflow JSON: /workflows/${wfName}.json\n`)); continue; }
-
-      const doneCount = (() => {
-        try { return JSON.parse(vfs.read('/scratch/workflow-state.json') || 'null')?.completedSteps?.length ?? 0; } catch { return 0; }
-      })();
-      output.write('\n' + c('cyan', `  Workflow: ${wfName}`) + c('gray', ` (${doneCount}/${wf.steps.length} steps done)`) + '\n');
-
-      await runWorkflowSteps(wf, wfName, vfs, state, deps, {
-        onStepStart:          (id, preview) => output.write('\n' + c('amber', `  ▶ [${id}]`) + c('gray', ` ${preview}`) + '\n'),
-        onStepVerifying:      (id) => output.write(c('gray', `  ↺ [${id}] verifying...\n`)),
-        onStepDone:           (id) => output.write(c('green', `  ✓ [${id}] complete\n`)),
-        onStepSkipped:        (id) => output.write(c('gray', `  ✓ [${id}] already done\n`)),
-        onCheckpointUpdated:  (id) => output.write(c('gray', `  (checkpoint updated for step ${id})\n`)),
-        onComplete:           (name) => { output.write('\n' + c('green', `  ✅ Workflow "${name}" complete!`) + '\n\n'); ui.hr(); },
-        onUserMsg:            (text) => ui.user(text),
+      const wfArgs = msg.slice(10).trim();
+      await dispatchWorkflowCommand(wfArgs, {
+        vfs, state, deps,
+        getLLMClient,
+        callbacks: {
+          onError:    (m) => output.write(c('red', `  ${m}\n`)),
+          onNotFound: (n) => { output.write(c('red', `  Workflow "${n}" not found.\n`)); output.write(c('gray', `  Create it: :workflow create ${n} <goal>\n`)); },
+          onList: (workflows) => {
+            if (workflows.length === 0) {
+              output.write(c('gray', '  No workflows yet.\n'));
+              output.write(c('gray', '  Create one: :workflow create <name> <goal>\n'));
+            } else {
+              output.write('\n' + c('cyan', '  Workflows:') + '\n');
+              for (const wf of workflows) {
+                const statusStr = wf.status === 'complete'     ? c('green', 'complete')
+                                : wf.status === 'in-progress'  ? c('amber', `step ${wf.currentStep}`)
+                                : c('gray', 'not started');
+                output.write(c('gray', `    ${wf.name}`) + '  ' + statusStr + '\n');
+                if (wf.description) output.write(c('gray', `      ${wf.description}\n`));
+              }
+              output.write(c('gray', '\n  :workflow <name>                    — run\n'));
+              output.write(c('gray', '  :workflow create <name> <goal>      — create new\n'));
+              output.write(c('gray', '  :workflow improve <name> <feedback> — revise steps\n'));
+              output.write(c('gray', '  :workflow rsi <name> [budget]       — iterate definition\n'));
+            }
+            output.write('\n');
+          },
+          onUserMsg:  (text) => ui.user(text),
+          onRSIStart: (n, b) => output.write('\n' + c('cyan', `  Workflow RSI: ${n} (${b} experiments, LLM scoring enabled)`) + '\n'),
+          onRSIDone:  (results) => {
+            const kept = results.filter(r => r.kept).length;
+            output.write('\n' + c('cyan', `  Workflow RSI complete: ${kept}/${results.length} experiments kept`) + '\n');
+            const journal = vfs.read('/memory/experiments.jsonl');
+            if (journal) output.write(c('gray', `  experiments.jsonl: ${journal.split('\n').filter(Boolean).length} entries\n`));
+            ui.hr();
+          },
+          onRunStart: (n, done, total) => output.write('\n' + c('cyan', `  Workflow: ${n}`) + c('gray', ` (${done}/${total} steps done)`) + '\n'),
+          stepCallbacks: {
+            onStepStart:          (id, preview) => output.write('\n' + c('amber', `  ▶ [${id}]`) + c('gray', ` ${preview}`) + '\n'),
+            onStepVerifying:      (id) => output.write(c('gray', `  ↺ [${id}] verifying...\n`)),
+            onStepDone:           (id) => output.write(c('green', `  ✓ [${id}] complete\n`)),
+            onStepSkipped:        (id) => output.write(c('gray', `  ✓ [${id}] already done\n`)),
+            onCheckpointUpdated:  (id) => output.write(c('gray', `  (checkpoint updated for step ${id})\n`)),
+            onComplete:           (name) => { output.write('\n' + c('green', `  ✅ Workflow "${name}" complete!`) + '\n\n'); ui.hr(); },
+            onUserMsg:            (text) => ui.user(text),
+          },
+        },
       });
       continue;
     }
@@ -1085,36 +1034,23 @@ async function createRunContext() {
   const skillIndex = buildSkillIndex(vfs);
   const rsiLog = (msg) => output.write(c('cyan', `  rsi  `) + c('gray', msg) + '\n');
 
+  const emitFn = (ev) => ui.emitEvent(ev);
   const context = {
     vfs,
     fetch: (...args) => fetch(...args),
-    emit:  (ev) => ui.emitEvent(ev),
+    emit:  emitFn,
     approve: () => true,  // CLI: auto-approve risky patterns (user has shell access)
     env:   {},
     skillIndex,
     workspaceId: ghConfig ? getWorkspaceId(ghConfig.owner, ghConfig.repo, ghConfig.ref) : getSelfWorkspaceId(),
     github: ghClient ? makeGitHubHelper(ghClient, ghConfig) : null,
-    async commit(message = 'commit') {
-      const dirty = vfs.list().filter(p => vfs.isDirty(p));
-      const written = flushToDisk(vfs, dirty);
-      writeManifest();
-      if (ghClient && ghConfig) {
-        const srcDirty = dirty.filter(p => p.startsWith('/src/'));
-        if (srcDirty.length > 0) {
-          try {
-            await commitToGitHub(vfs, ghClient, {
-              owner: ghConfig.owner, repo: ghConfig.repo,
-              branch: ghConfig.ref, message, pathPrefix: '/src/',
-            }, (ev) => context.emit(ev));
-          } catch { /* logged by commitToGitHub */ }
-        }
-      }
-      for (const p of dirty) vfs.markClean(p);
-      if (written.length > 0) {
-        context.emit({ type: 'progress', message: `flushed ${written.length} files to disk` });
-      }
-      return dirty;
-    },
+    commit: createCommitFn({
+      vfs,
+      getGitHub: () => ghClient && ghConfig ? { client: ghClient, config: ghConfig } : null,
+      commitToGitHub,
+      emit: emitFn,
+      onFlush: (v, dirty) => { flushToDisk(v, dirty); writeManifest(); },
+    }),
   };
 
   const state = { history: [], turn: 0, context };

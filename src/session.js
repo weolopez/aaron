@@ -40,6 +40,7 @@ function getBrowserKey(workspaceId) {
  */
 function getNodeSessionPathSync(workspaceId) {
   if (!isNode) return null;
+  if (!workspaceId) return null;
   // Synchronous path construction - no async imports needed
   const homedir = process.env.HOME || process.env.USERPROFILE || '/tmp';
   const sanitizedId = workspaceId.replace(/[\/\\:@]/g, '_');
@@ -53,6 +54,7 @@ function getNodeSessionPathSync(workspaceId) {
  */
 async function getNodeSessionPath(workspaceId) {
   if (!isNode) return null;
+  if (!workspaceId) return null;
   const { join } = await import('node:path');
   const { homedir } = await import('node:os');
   return join(
@@ -85,6 +87,7 @@ const LEGACY_NODE_PATH = isNode
  * @returns {Promise<boolean>} - Success status
  */
 export async function saveSession(workspaceId, state, vfs) {
+  if (!workspaceId) return false;
   const payload = {
     version: SESSION_VERSION,
     timestamp: new Date().toISOString(),
@@ -93,7 +96,7 @@ export async function saveSession(workspaceId, state, vfs) {
       history: state.history,
       turn: state.turn || 0,
     },
-    vfs: vfs?.dump ? vfs.dump() : {},
+    vfs: vfs?.snapshot ? vfs.snapshot() : (vfs?.dump ? vfs.dump() : {}),
   };
 
   try {

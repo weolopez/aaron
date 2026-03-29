@@ -106,17 +106,20 @@
  * PRs are left open for manual review — close them at the URLs logged.
  */
 
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-import { createVFS, execute, extractCode } from '../src/agent-core.js';
-import { runTurn, buildSkillIndex } from '../src/agent-loop.js';
-import { createGitHubClient, initFromGitHub, commitToGitHub } from '../src/github.js';
+import { createGitHubClient } from '../src/github.js';
 import { runWorkflowSteps } from '../src/workflow-runner.js';
+import {
+  buildWorkspaceContext,
+  extractPRFromEvents,
+} from '../src/usecase-runtime.js';
+import {
+  createRunReport,
+  startScenario,
+  addStep,
+  addAssertion,
+  finalizeReport,
+} from '../src/usecase-report.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = join(__dirname, '..');
 const DRY_RUN = process.argv.includes('--dry-run');
 
 // ════════════════════════════════════════════════════
@@ -143,7 +146,11 @@ const timings  = {};
 // Branches and files we create — cleaned up in finally block
 const cleanup = { branches: [], injectedFiles: [] };
 
+const report = createRunReport({ owner: OWNER, repo: REPO, ref: BASE, suite: 'notification-service' });
+let activeScenario = null;
+
 function assert(condition, label) {
+  addAssertion(report, activeScenario, label, condition);
   if (condition) {
     console.log(`  ✅ ${label}`);
     passed++;
@@ -210,131 +217,23 @@ async function preflight(client) {
 }
 
 // ════════════════════════════════════════════════════
-// WORKSPACE FACTORY
-// ════════════════════════════════════════════════════
-
-/**
- * Build a fully-loaded context+state for running Aaron workflows.
- * Loads skills and workflows from disk, hydrates VFS from GitHub.
- */
-async function buildWorkspace(client) {
-  const vfs = createVFS();
-  const events = [];
-
-  // Load Aaron's own skills and workflows from disk
-  function loadDirSync(baseDir, vfsPrefix) {
-    if (!existsSync(baseDir)) return;
-    (function walk(dir, prefix) {
-      for (const e of readdirSync(dir, { withFileTypes: true })) {
-        const d = join(dir, e.name), v = prefix + e.name;
-        if (e.isDirectory()) walk(d, v + '/');
-        else {
-          try { vfs.write(v, readFileSync(d, 'utf8')); vfs.markClean(v); } catch {}
-        }
-      }
-    })(baseDir, vfsPrefix);
-  }
-  loadDirSync(join(ROOT, 'skills'),    '/skills/');
-  loadDirSync(join(ROOT, 'workflows'), '/workflows/');
-
-  // Hydrate from GitHub (also mounts .aaron/ project-skills, project-workflows, memory)
-  const hydrated = await initFromGitHub(
-    { owner: OWNER, repo: REPO, ref: BASE },
-    vfs, client,
-    ev => { if (ev.type === 'progress') process.stdout.write(`    ◆ ${ev.message}\n`); },
-  );
-
-  // GitHub helper bound to this repo
-  const gh = {
-    owner: OWNER, repo: REPO, ref: BASE,
-    async getLatestSha(branch = BASE) {
-      const d = await client.getBranch(OWNER, REPO, branch);
-      if (!d) throw new Error(`Branch not found: ${branch}`);
-      return d.sha;
-    },
-    async createBranch(name, fromRef = BASE) {
-      const sha = await this.getLatestSha(fromRef);
-      await client.createBranch(OWNER, REPO, name, sha);
-    },
-    async createPR(opts) { return client.createPR(OWNER, REPO, opts); },
-    async listPRs(state = 'open') { return client.listPRs(OWNER, REPO, state); },
-    async getPR(n) { return client.getPR(OWNER, REPO, n); },
-    async mergePR(n, opts) { return client.mergePR(OWNER, REPO, n, opts); },
-    async deleteBranch(name) { return client.deleteBranch(OWNER, REPO, name); },
-  };
-
-  const emit = ev => {
-    events.push(ev);
-    if      (ev.type === 'progress') process.stdout.write(`    ◆ ${ev.message}\n`);
-    else if (ev.type === 'done')     process.stdout.write(`    ✓ ${ev.message}\n`);
-    else if (ev.type === 'blocked')  process.stdout.write(`    ⊘ ${ev.reason}\n`);
-    else if (ev.type === 'error')    process.stdout.write(`    ✕ ${ev.message}\n`);
-  };
-
-  const skillIndex = buildSkillIndex(vfs);
-  const context = {
-    vfs, events, emit,
-    fetch: (...a) => fetch(...a),
-    env: {},
-    skillIndex,
-    github: gh,
-    async commit(message = 'commit', branch) {
-      const dirty = vfs.list().filter(p => vfs.isDirty(p));
-      const srcDirty = dirty.filter(p => p.startsWith('/src/'));
-      if (srcDirty.length > 0) {
-        await commitToGitHub(vfs, client, {
-          owner: OWNER, repo: REPO,
-          branch: branch ?? BASE, message, pathPrefix: '/src/',
-        }, emit);
-      }
-      for (const p of dirty) vfs.markClean(p);
-      return dirty;
-    },
-  };
-
-  const state = { history: [], turn: 0, context };
-  const ui = {
-    setStatus() {},
-    showCode() {},
-    emitEvent: emit,
-    onRetry(n, max) { process.stdout.write(`    ↺ retry ${n}/${max}\n`); },
-    onTurnComplete() {},
-  };
-  const deps = { execute, extractCode, ui, runTurn };
-
-  return { vfs, context, state, deps, events, hydrated };
-}
-
-/** Extract the last PR number emitted by the agent across all events. */
-function extractPR(events) {
-  for (let i = events.length - 1; i >= 0; i--) {
-    const ev = events[i];
-    if (ev.type === 'result') {
-      if (ev.value?.pr_number) return { number: ev.value.pr_number, url: ev.value.pr_url };
-      if (ev.value?.pr_url) {
-        const m = String(ev.value.pr_url).match(/\/pull\/(\d+)/);
-        if (m) return { number: parseInt(m[1]), url: ev.value.pr_url };
-      }
-    }
-  }
-  return null;
-}
-
-// ════════════════════════════════════════════════════
 // USE CASE 1: Workspace Init + Exploration
 // ════════════════════════════════════════════════════
 
 async function uc1_init(client) {
+  activeScenario = startScenario(report, 'uc1:init');
   section('UC-1: Workspace Init + Exploration');
 
   // ── Setup ────────────────────────────────────────
   step('Hydrating workspace from GitHub...');
+  addStep(activeScenario, 'Hydrate workspace from GitHub');
   time('uc1');
-  const ws = await buildWorkspace(client);
+  const ws = await buildWorkspaceContext(client, { owner: OWNER, repo: REPO, ref: BASE, base: BASE });
   assert(ws.hydrated.files > 0, `Hydrated ${ws.hydrated.files} files from ${OWNER}/${REPO}`);
 
   // ── Execute: single runTurn with init skill ──────
   step('Running init skill...');
+  addStep(activeScenario, 'Run init skill via runTurn');
   const initSkillMd = ws.vfs.read('/skills/init/SKILL.md');
   assert(initSkillMd !== null, 'init/SKILL.md loaded into VFS');
 
@@ -352,11 +251,12 @@ async function uc1_init(client) {
     'The repo contains a notification service implementation.',
   ].join('\n');
 
-  await runTurn(prompt, ws.state, ws.deps);
+  await ws.deps.runTurn(prompt, ws.state, ws.deps);
   console.log(`    (${elapsed('uc1')})`);
 
   // ── Validate: VFS state ──────────────────────────
   step('Validating VFS outputs...');
+  addStep(activeScenario, 'Validate VFS outputs');
 
   const notes = ws.vfs.read('/memory/project-notes.md');
   assert(notes !== null,         'project-notes.md written to VFS');
@@ -376,10 +276,12 @@ async function uc1_init(client) {
 // ════════════════════════════════════════════════════
 
 async function uc2_bugfix(client) {
+  activeScenario = startScenario(report, 'uc2:bugfix');
   section('UC-2: Bug Fix — Inject, Diagnose, Fix, PR');
 
-  // ── Setup: inject a known bug onto main ──────────
+  // ── Setup: inject a known bug onto main ────────
   step('Reading current notification service from GitHub...');
+  addStep(activeScenario, 'Read source and inject bug');
   const serviceFile = await client.getFile(OWNER, REPO, 'src/services/notification.js', BASE);
   assert(serviceFile !== null, 'src/services/notification.js exists on main');
   if (!serviceFile) return;
@@ -423,8 +325,9 @@ async function uc2_bugfix(client) {
 
   // ── Setup: hydrate fresh workspace with the buggy code ──
   step('Hydrating fresh workspace with buggy main...');
+  addStep(activeScenario, 'Hydrate workspace from GitHub');
   time('uc2');
-  const ws = await buildWorkspace(client);
+  const ws = await buildWorkspaceContext(client, { owner: OWNER, repo: REPO, ref: BASE, base: BASE });
 
   // Write a symptom-based bug report (not the root cause — Aaron must diagnose)
   ws.vfs.write('/memory/bug-report.md', [
@@ -444,8 +347,7 @@ async function uc2_bugfix(client) {
   ].join('\n'));
 
   // ── Execute: bug-fix workflow ────────────────────
-  step('Running bug-fix workflow...');
-  const workflowDef = JSON.parse(ws.vfs.read('/workflows/bug-fix.json'));
+  step('Running bug-fix workflow...');  addStep(activeScenario, 'Run bug-fix workflow');  const workflowDef = JSON.parse(ws.vfs.read('/workflows/bug-fix.json'));
 
   let prInfo = null;
   let blocked = false;
@@ -458,11 +360,12 @@ async function uc2_bugfix(client) {
     },
   });
 
-  prInfo = extractPR(ws.context.events);
+  prInfo = extractPRFromEvents(ws.events);
   console.log(`    (${elapsed('uc2')})`);
 
   // ── Validate: VFS state ──────────────────────────
   step('Validating diagnosis and fix...');
+  addStep(activeScenario, 'Validate diagnosis and fix artifacts');
 
   const diagnosis = ws.vfs.read('/scratch/bug-fix/diagnosis.md');
   assert(diagnosis !== null, 'Diagnosis written to /scratch/bug-fix/diagnosis.md');
@@ -511,12 +414,14 @@ async function uc2_bugfix(client) {
 // ════════════════════════════════════════════════════
 
 async function uc3_feature(client) {
+  activeScenario = startScenario(report, 'uc3:feature');
   section('UC-3: New Feature — Plan, Implement, Verify, PR');
 
   // ── Setup: write feature request ─────────────────
   step('Hydrating workspace and writing task...');
+  addStep(activeScenario, 'Hydrate workspace and write task');
   time('uc3');
-  const ws = await buildWorkspace(client);
+  const ws = await buildWorkspaceContext(client, { owner: OWNER, repo: REPO, ref: BASE, base: BASE });
 
   ws.vfs.write('/memory/task.md', [
     '# Task: Add NotificationQueue',
@@ -542,6 +447,7 @@ async function uc3_feature(client) {
 
   // ── Execute: plan-implement-verify workflow ──────
   step('Running plan-implement-verify workflow...');
+  addStep(activeScenario, 'Run plan-implement-verify workflow');
   const workflowDef = JSON.parse(ws.vfs.read('/workflows/plan-implement-verify.json'));
   assert(workflowDef?.steps?.length >= 4, `Workflow has ${workflowDef?.steps?.length} steps`);
 
@@ -558,11 +464,12 @@ async function uc3_feature(client) {
     },
   });
 
-  prInfo = extractPR(ws.context.events);
+  prInfo = extractPRFromEvents(ws.events);
   console.log(`    (${elapsed('uc3')})`);
 
-  // ── Validate: VFS artifacts ──────────────────────
+  // ── Validate: VFS artifacts ────────────────
   step('Validating plan and implementation...');
+  addStep(activeScenario, 'Validate plan and implementation artifacts');
 
   const plan = ws.vfs.read('/scratch/plan-implement-verify/plan.md');
   assert(plan !== null, 'Plan written to /scratch/plan-implement-verify/plan.md');
@@ -677,11 +584,16 @@ async function main() {
   }
 
   // ── Summary ──────────────────────────────────────
+  const summary = finalizeReport(report);
   console.log('\n' + '═'.repeat(70));
   console.log(`  ${passed + failed} assertions: ${passed} passed, ${failed} failed`);
   if (failures.length > 0) {
     console.log('\n  Failed:');
     for (const f of failures) console.log(`    ❌ ${f}`);
+  }
+  if (summary.recommendations?.length > 0) {
+    console.log('\n  Recommendations:');
+    for (const r of summary.recommendations) console.log(`    → ${r}`);
   }
   console.log('═'.repeat(70) + '\n');
 

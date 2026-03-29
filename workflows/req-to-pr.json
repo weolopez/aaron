@@ -9,7 +9,8 @@
     },
     {
       "id": "implement",
-      "prompt": "Read the plan at /scratch/req-to-pr/plan.md. Implement ALL the files listed in 'files to create' and make ALL the changes listed in 'files to modify'. Write each file to /src/ as specified in the plan. Emit file_write for each file. Emit progress between major steps. When all files are written, emit a metric with the count of files created."
+      "no_commit": true,
+      "prompt": "Read the plan at /scratch/req-to-pr/plan.md. Implement ALL the files listed in 'files to create' and make ALL the changes listed in 'files to modify'. Write each file to the EXACT path shown in the plan — paths already include the /src/ prefix, do NOT prepend /src/ again. Emit file_write for each file. Emit progress between major steps. When all files are written, emit a metric with the count of files created. Do NOT call context.commit() — the next step will commit everything to a feature branch."
     },
     {
       "id": "open-pr",

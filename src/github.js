@@ -145,12 +145,19 @@ export function createGitHubClient({ token, fetch: fetchFn = fetch }) {
      * @returns {{ number, html_url, title }} or throws
      */
     async createPR(owner, repo, { title, body, head, base = 'main' }) {
-      const data = await request('POST', `/repos/${owner}/${repo}/pulls`, {
-        title, body, head, base,
+      // Use raw fetch so we capture the actual GitHub error body on all non-2xx responses
+      const res = await fetchFn(`${API}/repos/${owner}/${repo}/pulls`, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, body, head, base }),
       });
-      if (!data) {
-        throw new Error(`Failed to create PR (404): head=${head}, base=${base} — branch may not exist or token lacks permissions`);
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        const msg = errData.message || res.statusText;
+        const errors = errData.errors?.map(e => e.message).join('; ') ?? '';
+        throw new Error(`Failed to create PR (${res.status}): ${msg}${errors ? ' — ' + errors : ''} [head=${head}, base=${base}]`);
       }
+      const data = await res.json();
       return { number: data.number, html_url: data.html_url, title: data.title };
     },
 
@@ -262,6 +269,9 @@ export async function initFromGitHub(config, vfs, client, emit) {
 
   emit?.({ type: 'progress', message: `Fetching ${fetchable.length} files (${skipped} skipped)...` });
 
+  // Clear stale /src/ files from any previous repo
+  for (const p of vfs.list().filter(p => p.startsWith('/src/'))) vfs.delete(p);
+
   let count = 0;
   for (const f of fetchable) {
     try {
@@ -316,8 +326,8 @@ export async function initFromGitHub(config, vfs, client, emit) {
           vfs.markClean(destPath);
           aaronMounted++;
         } else if (relPath.startsWith('memory/')) {
-          // Merge project memory into /memory/
-          const destPath = '/memory/' + relPath.slice('memory/'.length);
+          // Merge project memory into /memory/repos/<owner>/<repo>/
+          const destPath = `/memory/repos/${owner}/${repo}/` + relPath.slice('memory/'.length);
           vfs.write(destPath, result.content);
           vfs.setSHA(destPath, result.sha);
           vfs.markClean(destPath);
@@ -333,6 +343,99 @@ export async function initFromGitHub(config, vfs, client, emit) {
   }
 
   return { files: count, skipped, aaronFiles: aaronFiles.length };
+}
+
+// ════════════════════════════════════════════════════
+// SYNC FROM GITHUB (Differential)
+// ════════════════════════════════════════════════════
+
+export async function syncFromGitHub(config, vfs, client, emit, externalSHAs = {}) {
+  const { owner, repo, ref = 'main', include, exclude } = config;
+
+  // Build SHA map: merge external cache (e.g. from localStorage) with any SHAs already in VFS
+  const vfsSnapshot = vfs.snapshot ? vfs.snapshot() : {};
+  const cachedSHAs = { ...externalSHAs };
+  for (const [path, meta] of Object.entries(vfsSnapshot)) {
+    if (meta?.sha) cachedSHAs[path] = meta.sha;
+  }
+
+  emit?.({ type: 'progress', message: `Syncing with ${owner}/${repo}@${ref}...` });
+
+  const tree = await client.getTree(owner, repo, ref);
+  if (tree === null) {
+    emit?.({ type: 'progress', message: `Repository not found or not accessible: ${owner}/${repo}@${ref}` });
+    return { files: 0, skipped: 0, cached: 0, updated: 0, aaronFiles: 0 };
+  }
+  if (!tree.length) {
+    emit?.({ type: 'progress', message: 'Repository is empty (no files).' });
+    return { files: 0, skipped: 0, cached: 0, updated: 0, aaronFiles: 0 };
+  }
+
+  const filtered = tree.filter(f => {
+    if (exclude) { for (const pat of exclude) { if (f.path.startsWith(pat) || f.path === pat) return false; } }
+    if (include) { for (const pat of include) { if (f.path.startsWith(pat) || f.path === pat) return true; } return false; }
+    return true;
+  });
+
+  const MAX_FILE_SIZE = 1_000_000;
+  const fetchable = filtered.filter(f => f.size <= MAX_FILE_SIZE);
+  const skipped = filtered.length - fetchable.length;
+
+  const toFetch = fetchable.filter(f => cachedSHAs['/src/' + f.path] !== f.sha);
+  const cached = fetchable.length - toFetch.length;
+
+  if (toFetch.length === 0) {
+    emit?.({ type: 'progress', message: `Sync complete: ${cached} files cached, 0 changed.` });
+  } else {
+    emit?.({ type: 'progress', message: `Sync: ${cached} cached, fetching ${toFetch.length} changed file(s)...` });
+  }
+
+  let updated = 0;
+  for (const f of toFetch) {
+    try {
+      const result = await client.getFile(owner, repo, f.path, ref);
+      if (result) {
+        const vfsPath = '/src/' + f.path;
+        vfs.write(vfsPath, result.content);
+        vfs.setSHA(vfsPath, result.sha);
+        vfs.markClean(vfsPath);
+        updated++;
+      }
+    } catch (e) {
+      emit?.({ type: 'progress', message: `Warning: failed to fetch ${f.path}: ${e.message}` });
+    }
+    if (updated > 0 && updated % 20 === 0) {
+      emit?.({ type: 'progress', message: `Fetched ${updated}/${toFetch.length} changed files...` });
+    }
+  }
+
+  if (toFetch.length > 0) {
+    emit?.({ type: 'progress', message: `Sync complete: ${cached} cached, ${updated} updated from ${owner}/${repo}@${ref}` });
+  }
+
+  const aaronFiles = tree.filter(f => f.path.startsWith('.aaron/'));
+  let aaronMounted = 0;
+  for (const f of aaronFiles) {
+    const relPath = f.path.slice('.aaron/'.length);
+    let destPath;
+    if (relPath.startsWith('skills/')) destPath = '/project-skills/' + relPath.slice('skills/'.length);
+    else if (relPath.startsWith('workflows/')) destPath = '/project-workflows/' + relPath.slice('workflows/'.length);
+    else if (relPath.startsWith('memory/')) destPath = `/memory/repos/${owner}/${repo}/` + relPath.slice('memory/'.length);
+    else continue;
+    if (cachedSHAs[destPath] === f.sha) continue;
+    try {
+      const result = await client.getFile(owner, repo, f.path, ref);
+      if (!result) continue;
+      vfs.write(destPath, result.content);
+      vfs.setSHA(destPath, result.sha);
+      vfs.markClean(destPath);
+      aaronMounted++;
+    } catch (e) {
+      emit?.({ type: 'progress', message: `Warning: failed to sync .aaron/${relPath}: ${e.message}` });
+    }
+  }
+
+  return { files: fetchable.length, skipped, cached, updated, aaronFiles: aaronFiles.length };
 }
 
 // ════════════════════════════════════════════════════
