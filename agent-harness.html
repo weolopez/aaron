@@ -1170,6 +1170,7 @@ const agentState = {
         ? `${location.origin}/v1/messages`
         : 'https://api.anthropic.com/v1/messages',
     },
+    workspaceId: BROWSER_WORKSPACE_ID,
     github: null,
     async commit(message = 'commit') {
       const dirty = vfs.list().filter(p => vfs.isDirty(p));

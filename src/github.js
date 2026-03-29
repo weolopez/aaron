@@ -262,6 +262,9 @@ export async function initFromGitHub(config, vfs, client, emit) {
 
   emit?.({ type: 'progress', message: `Fetching ${fetchable.length} files (${skipped} skipped)...` });
 
+  // Clear stale /src/ files from any previous repo
+  for (const p of vfs.list().filter(p => p.startsWith('/src/'))) vfs.delete(p);
+
   let count = 0;
   for (const f of fetchable) {
     try {
@@ -316,8 +319,8 @@ export async function initFromGitHub(config, vfs, client, emit) {
           vfs.markClean(destPath);
           aaronMounted++;
         } else if (relPath.startsWith('memory/')) {
-          // Merge project memory into /memory/
-          const destPath = '/memory/' + relPath.slice('memory/'.length);
+          // Merge project memory into /memory/repos/<owner>/<repo>/
+          const destPath = `/memory/repos/${owner}/${repo}/` + relPath.slice('memory/'.length);
           vfs.write(destPath, result.content);
           vfs.setSHA(destPath, result.sha);
           vfs.markClean(destPath);
@@ -437,7 +440,7 @@ export async function syncFromGitHub(config, vfs, client, emit, externalSHAs = {
     } else if (relPath.startsWith('workflows/')) {
       destPath = '/project-workflows/' + relPath.slice('workflows/'.length);
     } else if (relPath.startsWith('memory/')) {
-      destPath = '/memory/' + relPath.slice('memory/'.length);
+      destPath = `/memory/repos/${owner}/${repo}/` + relPath.slice('memory/'.length);
     } else {
       continue;
     }

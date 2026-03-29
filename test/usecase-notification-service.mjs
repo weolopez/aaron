@@ -124,7 +124,7 @@ const DRY_RUN = process.argv.includes('--dry-run');
 // ════════════════════════════════════════════════════
 
 const GITHUB_TOKEN   = process.env.GITHUB_TOKEN;
-const ANTHROPIC_KEY  = process.env.ANTHROPIC_API_KEY;
+const ANTHROPIC_KEY  = process.env.ANTHROPIC_API_KEY || process.env.OPENROUTER_API_KEY;
 const OWNER          = 'weolopez';
 const REPO           = 'aaron-test-repo';
 const BASE           = 'main';

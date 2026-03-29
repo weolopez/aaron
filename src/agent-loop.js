@@ -204,7 +204,10 @@ export async function runTurn(userMessage, state, { execute, extractCode, ui }) 
         workspaceContext += `  Use context.vfs.list() to explore, context.vfs.read('/src/...') to read files.\n`;
       }
       const vfsPaths = state.context.vfs?.list?.() ?? [];
-      if (vfsPaths.length > 0) {
+      if (state.context.github && vfsPaths.length > 0) {
+        const repoPaths = vfsPaths.filter(p => p.startsWith('/src/')).map(p => p.slice(5));
+        workspaceContext += `  Repo contains ${repoPaths.length} file(s): ${repoPaths.join(', ')}\n`;
+      } else if (vfsPaths.length > 0) {
         const dirs = [...new Set(vfsPaths.map(p => p.split('/').slice(0, 3).join('/')))].slice(0, 20);
         workspaceContext += `  VFS top-level paths (${vfsPaths.length} total): ${dirs.join(', ')}\n`;
       }
