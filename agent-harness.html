@@ -450,7 +450,31 @@ textarea#input::placeholder { color: var(--dim); }
 .vfs-file:hover { background: var(--bg4); color: var(--text); }
 .vfs-file.dirty { color: var(--amber); }
 .vfs-file .vfs-icon { flex-shrink: 0; font-size: 10px; }
-.vfs-file .vfs-name { overflow: hidden; text-overflow: ellipsis; }
+.vfs-file .vfs-name { overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
+.vfs-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 1px;
+  opacity: 0;
+  transition: opacity 0.1s;
+  flex-shrink: 0;
+}
+.vfs-file:hover .vfs-actions { opacity: 1; }
+.vfs-actions button {
+  background: none; border: none; color: var(--dim);
+  cursor: pointer; font-size: 10px; padding: 1px 4px;
+  border-radius: 2px; line-height: 1;
+}
+.vfs-actions button:hover { color: var(--text); background: var(--bg4); }
+
+/* VFS new-file button */
+#vfs-new {
+  background: none; border: 1px solid var(--border); border-radius: 2px;
+  color: var(--dim2); cursor: pointer; font-size: 13px; padding: 0 5px;
+  line-height: 1.2; margin-left: 4px;
+  transition: color 0.1s, border-color 0.1s;
+}
+#vfs-new:hover { color: var(--text); border-color: var(--amber-brd); }
 
 /* ── FILE VIEWER MODAL ───────────────────────────── */
 .modal-overlay {
@@ -489,18 +513,58 @@ textarea#input::placeholder { color: var(--dim); }
 .modal-path { font-size: 12px; color: var(--amber); }
 .modal-size { font-size: 10px; color: var(--dim); }
 
-.modal-close {
+.modal-close, .modal-act {
   background: none;
   border: none;
   color: var(--dim);
   cursor: pointer;
-  font-size: 16px;
-  padding: 2px 6px;
+  font-size: 11px;
+  padding: 2px 7px;
   border-radius: 2px;
-  transition: color 0.1s, background 0.1s;
+  transition: color 0.1s, background 0.1s, border-color 0.1s;
   line-height: 1;
+  font-family: var(--mono);
+  letter-spacing: 0.03em;
+  border: 1px solid transparent;
 }
-.modal-close:hover { color: var(--text); background: var(--bg4); }
+.modal-close { font-size: 16px; border: none; }
+.modal-close:hover, .modal-act:hover { color: var(--text); background: var(--bg4); }
+.modal-act { color: var(--dim2); border-color: var(--border); }
+.modal-act:hover { border-color: var(--amber-brd); }
+.modal-act.danger:hover { color: var(--red); border-color: var(--red); }
+.modal-act.primary { color: var(--cyan); border-color: var(--cyan-brd); }
+.modal-act.primary:hover { background: var(--bg4); }
+.modal-actions { display: flex; gap: 4px; align-items: center; }
+
+/* Modal textarea for inline editing */
+.modal-textarea {
+  width: 100%;
+  min-height: 200px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.75;
+  background: var(--bg);
+  color: var(--text);
+  border: none;
+  outline: none;
+  resize: vertical;
+  padding: 0;
+  flex: 1;
+}
+
+/* Rename path input */
+.modal-path-input {
+  background: var(--bg3);
+  border: 1px solid var(--amber-brd);
+  color: var(--amber);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  flex: 1;
+  outline: none;
+}
+.modal-path-input:focus { border-color: var(--cyan-brd); }
 
 .modal-body {
   overflow: auto;
@@ -717,6 +781,7 @@ textarea#input::placeholder { color: var(--dim); }
         <div class="panel-label">
           VFS
           <span class="count" id="vfs-count">0</span>
+          <button id="vfs-new" title="New file">+</button>
         </div>
         <div class="panel-body" id="vfs-tree">
           <div class="panel-empty">Empty — agent writes files here.</div>
@@ -922,6 +987,10 @@ const ui = {
         html += `<div class="vfs-file ${dirty ? 'dirty' : ''}" data-path="${esc(p)}">
           <span class="vfs-icon">${icon}</span>
           <span class="vfs-name">${esc(name)}</span>
+          <span class="vfs-actions">
+            <button class="vfs-act-preview" data-path="${esc(p)}" title="Open in preview">◈</button>
+            <button class="vfs-act-delete" data-path="${esc(p)}" title="Delete">✕</button>
+          </span>
         </div>`;
       }
     }
@@ -929,11 +998,28 @@ const ui = {
     vfsEl.innerHTML = html;
 
     vfsEl.querySelectorAll('.vfs-file').forEach(el => {
-      el.addEventListener('click', () => {
-        const path    = el.dataset.path;
-        const content = agentState.context.vfs.read(path) ?? '';
-        const bytes   = new Blob([content]).size;
-        showModal(path, content, bytes);
+      el.addEventListener('click', (e) => {
+        if (e.target.closest('.vfs-actions')) return;
+        const path = el.dataset.path;
+        showFileModal(path);
+      });
+    });
+
+    vfsEl.querySelectorAll('.vfs-act-preview').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        previewFile(btn.dataset.path);
+      });
+    });
+
+    vfsEl.querySelectorAll('.vfs-act-delete').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const path = btn.dataset.path;
+        if (!confirm(`Delete ${path}?`)) return;
+        agentState.context.vfs.delete(path);
+        ui.refreshVFS(agentState.context.vfs);
+        refreshPreviewSelect();
       });
     });
   },
@@ -951,24 +1037,116 @@ const ui = {
   },
 };
 
-function showModal(path, content, bytes) {
+function showFileModal(path) {
+  const vfs = agentState.context.vfs;
+  let content = vfs.read(path) ?? '';
+  let bytes = new Blob([content]).size;
+  let editing = false;
+  let renaming = false;
+  let currentPath = path;
+
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
-  overlay.innerHTML = `
-    <div class="modal">
-      <div class="modal-header">
-        <span class="modal-path">${esc(path)}</span>
-        <span class="modal-size">${bytes} bytes</span>
-        <button class="modal-close">✕</button>
-      </div>
-      <div class="modal-body"><pre>${esc(content)}</pre></div>
-    </div>`;
   document.body.appendChild(overlay);
-  overlay.querySelector('.modal-close').onclick = () => overlay.remove();
-  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
-  document.addEventListener('keydown', function esc(e) {
-    if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', esc); }
-  });
+
+  function render() {
+    bytes = new Blob([content]).size;
+    overlay.innerHTML = `
+      <div class="modal">
+        <div class="modal-header">
+          ${renaming
+            ? `<input class="modal-path-input" id="rename-input" value="${esc(currentPath)}" />`
+            : `<span class="modal-path">${esc(currentPath)}</span>`
+          }
+          <span class="modal-size">${bytes} bytes</span>
+          <div class="modal-actions">
+            ${editing
+              ? `<button class="modal-act primary" id="m-save">save</button>
+                 <button class="modal-act" id="m-cancel">cancel</button>`
+              : renaming
+              ? `<button class="modal-act primary" id="m-rename-save">save</button>
+                 <button class="modal-act" id="m-rename-cancel">cancel</button>`
+              : `<button class="modal-act" id="m-edit" title="Edit file">✎ edit</button>
+                 <button class="modal-act" id="m-rename" title="Rename file">✏ rename</button>
+                 <button class="modal-act" id="m-preview" title="Open in preview">◈ preview</button>
+                 <button class="modal-act danger" id="m-delete" title="Delete file">✕ delete</button>`
+            }
+            <button class="modal-close" id="m-close">✕</button>
+          </div>
+        </div>
+        <div class="modal-body">
+          ${editing
+            ? `<textarea class="modal-textarea" id="modal-editor">${esc(content)}</textarea>`
+            : `<pre>${esc(content)}</pre>`
+          }
+        </div>
+      </div>`;
+
+    overlay.querySelector('#m-close').onclick = () => close();
+
+    if (editing) {
+      overlay.querySelector('#m-save').onclick = () => {
+        content = overlay.querySelector('#modal-editor').value;
+        vfs.write(currentPath, content);
+        ui.refreshVFS(vfs);
+        refreshPreviewSelect();
+        editing = false;
+        render();
+      };
+      overlay.querySelector('#m-cancel').onclick = () => {
+        content = vfs.read(currentPath) ?? '';
+        editing = false;
+        render();
+      };
+      // focus textarea
+      const ta = overlay.querySelector('#modal-editor');
+      if (ta) { ta.focus(); ta.setSelectionRange(0, 0); }
+    } else if (renaming) {
+      overlay.querySelector('#m-rename-save').onclick = () => {
+        const newPath = overlay.querySelector('#rename-input').value.trim();
+        if (!newPath || newPath === currentPath) { renaming = false; render(); return; }
+        vfs.write(newPath, content);
+        vfs.delete(currentPath);
+        currentPath = newPath;
+        content = vfs.read(currentPath) ?? '';
+        renaming = false;
+        ui.refreshVFS(vfs);
+        refreshPreviewSelect();
+        render();
+      };
+      overlay.querySelector('#m-rename-cancel').onclick = () => { renaming = false; render(); };
+      const inp = overlay.querySelector('#rename-input');
+      if (inp) { inp.focus(); inp.select(); }
+      inp.addEventListener('keydown', e => {
+        if (e.key === 'Enter') overlay.querySelector('#m-rename-save').click();
+        if (e.key === 'Escape') overlay.querySelector('#m-rename-cancel').click();
+      });
+    } else {
+      overlay.querySelector('#m-edit').onclick = () => { editing = true; render(); };
+      overlay.querySelector('#m-rename').onclick = () => { renaming = true; render(); };
+      overlay.querySelector('#m-preview').onclick = () => { previewFile(currentPath); close(); };
+      overlay.querySelector('#m-delete').onclick = () => {
+        if (!confirm(`Delete ${currentPath}?`)) return;
+        vfs.delete(currentPath);
+        ui.refreshVFS(vfs);
+        refreshPreviewSelect();
+        close();
+      };
+    }
+  }
+
+  function close() {
+    overlay.remove();
+    document.removeEventListener('keydown', onKey);
+  }
+
+  function onKey(e) {
+    if (e.key === 'Escape') close();
+  }
+
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  document.addEventListener('keydown', onKey);
+  render();
 }
 
 // ════════════════════════════════════════════════════
@@ -1364,6 +1542,20 @@ const previewFrame   = document.getElementById('preview-frame');
 const previewEmpty   = document.getElementById('preview-empty');
 
 let showSource = false;
+const pinnedPreviewPaths = new Set();
+
+function previewFile(path) {
+  pinnedPreviewPaths.add(path);
+  refreshPreviewSelect();
+  previewSelect.value = path;
+  showSource = false;
+  previewSrc.classList.remove('active');
+  if (mainEl.classList.contains('preview-hidden')) {
+    mainEl.classList.remove('preview-hidden');
+    previewToggle.classList.add('active');
+  }
+  renderPreview();
+}
 
 // ── THEME ──────────────────────────────────────────
 function applyTheme(light) {
@@ -1401,7 +1593,9 @@ function isPreviewable(path) {
 // Rebuild the file select dropdown from VFS
 function refreshPreviewSelect() {
   const current = previewSelect.value;
-  const paths = vfs.list().filter(isPreviewable);
+  const natural = vfs.list().filter(isPreviewable);
+  const pinned  = [...pinnedPreviewPaths].filter(p => vfs.read(p) !== null);
+  const paths   = [...new Set([...natural, ...pinned])];
   previewSelect.innerHTML = '<option value="">— select file —</option>';
   for (const p of paths) {
     const opt = document.createElement('option');
