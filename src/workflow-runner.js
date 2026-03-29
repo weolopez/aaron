@@ -157,9 +157,12 @@ export async function runWorkflowSteps(wf, wfName, vfs, state, deps, hooks = {})
     }
 
     // Append checkpoint + commit instructions
+    const commitInstruction = step.no_commit
+      ? '2. Do NOT call context.commit() — files must remain dirty for the next step.'
+      : `2. Call await context.commit('workflow: ${wfName} — step ${step.id} complete').`;
     turnPrompt += `\n\nAfter completing this step:
 1. Update /scratch/workflow-state.json: add "${step.id}" to completedSteps, set outputs["${step.id}"] to a brief result summary.
-2. Call await context.commit('workflow: ${wfName} — step ${step.id} complete').
+${commitInstruction}
 3. context.emit({ type: 'done', message: 'Step ${step.id} complete' })`;
 
     // Intercept blocked events emitted during this step

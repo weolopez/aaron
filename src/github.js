@@ -145,12 +145,19 @@ export function createGitHubClient({ token, fetch: fetchFn = fetch }) {
      * @returns {{ number, html_url, title }} or throws
      */
     async createPR(owner, repo, { title, body, head, base = 'main' }) {
-      const data = await request('POST', `/repos/${owner}/${repo}/pulls`, {
-        title, body, head, base,
+      // Use raw fetch so we capture the actual GitHub error body on all non-2xx responses
+      const res = await fetchFn(`${API}/repos/${owner}/${repo}/pulls`, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, body, head, base }),
       });
-      if (!data) {
-        throw new Error(`Failed to create PR (404): head=${head}, base=${base} — branch may not exist or token lacks permissions`);
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        const msg = errData.message || res.statusText;
+        const errors = errData.errors?.map(e => e.message).join('; ') ?? '';
+        throw new Error(`Failed to create PR (${res.status}): ${msg}${errors ? ' — ' + errors : ''} [head=${head}, base=${base}]`);
       }
+      const data = await res.json();
       return { number: data.number, html_url: data.html_url, title: data.title };
     },
 

@@ -177,6 +177,7 @@ export async function buildWorkspaceContext(client, { owner, repo, ref = 'main',
     skillIndex,
     github: ghHelper,
     commit: createUsecaseCommit({ vfs, client, owner, repo, ref, emit }),
+    workspaceId: `${owner}/${repo}@${ref}`,
   };
 
   const state = { history: [], turn: 0, context };

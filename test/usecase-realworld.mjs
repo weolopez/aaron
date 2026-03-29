@@ -142,7 +142,9 @@ async function scenario1() {
   step('1d. Verify GitHub state');
   addStep(activeScenario, 'Verify PR and artifacts');
 
-  // Find the branch that was created
+  // Require PR number to come from workflow events — fallback search masks failures
+  assert(prNumber !== null, 'Workflow emitted a result event with pr_number');
+
   if (prNumber) {
     const pr = await client.getPR(OWNER, REPO, prNumber);
     assert(pr !== null, `PR #${prNumber} exists on GitHub`);
@@ -153,17 +155,6 @@ async function scenario1() {
     if (branchName) createdBranches.push(branchName);
     createdPRs.push(prNumber);
     process.stdout.write(`    → PR: ${prUrl}\n`);
-  } else {
-    // Check if any branch was created even without a PR number
-    const openPRs = await client.listPRs(OWNER, REPO, 'open');
-    const agentPR = openPRs.find(pr => pr.head.startsWith('feat/') || pr.head.startsWith('docs/'));
-    assert(agentPR !== null, 'Agent opened at least one PR');
-    if (agentPR) {
-      prNumber = agentPR.number;
-      branchName = agentPR.head;
-      createdBranches.push(branchName);
-      createdPRs.push(prNumber);
-    }
   }
 
   // Verify VFS artifacts
@@ -368,10 +359,11 @@ async function scenario3(s2Result) {
 
     // Verify the fix actually corrects the bugs
     const fixedFile = ws2.vfs.read(notifFile);
+    assert(fixedFile !== null, `Agent wrote the fixed file back to VFS: ${notifFile}`);
     const hasBugFixed = fixedFile && !fixedFile.includes('i <= maxRetries');
     const hasEnumFixed = fixedFile && !fixedFile.includes("'URGENT'");
-    assert(hasBugFixed || fixedFile === null, 'Off-by-one bug fixed (or agent wrote new file)');
-    assert(hasEnumFixed || fixedFile === null, 'Wrong enum value fixed (or agent wrote new file)');
+    assert(hasBugFixed === true, 'Off-by-one bug fixed (i < maxRetries, not <=)');
+    assert(hasEnumFixed === true, "Wrong enum value fixed ('CRITICAL' restored, not 'URGENT')");
 
     const diagnosisFile = ws2.vfs.read('/scratch/bug-fix/diagnosis.md');
     assert(diagnosisFile !== null && diagnosisFile.length > 50, 'Diagnosis report written');
