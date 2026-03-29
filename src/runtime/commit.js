@@ -25,8 +25,10 @@ export function createCommitFn({ vfs, getGitHub, commitToGitHub, emit, onFlush, 
     // Platform-specific persistence (CLI writes to disk)
     if (onFlush) onFlush(vfs, dirty);
 
-    // Push to GitHub if connected
+    // Push to GitHub if connected; track which files were successfully pushed
     const gh = getGitHub();
+    const cleanable = new Set();
+
     if (gh) {
       for (const prefix of ghPrefixes) {
         const prefixDirty = dirty.filter(p => p.startsWith(prefix));
@@ -39,13 +41,21 @@ export function createCommitFn({ vfs, getGitHub, commitToGitHub, emit, onFlush, 
             message,
             pathPrefix: prefix,
           }, emit);
+          // Only mark clean if push succeeded
+          for (const p of prefixDirty) cleanable.add(p);
         } catch (e) {
           emit({ type: 'progress', message: `GitHub push failed: ${e.message}` });
         }
       }
     }
 
-    for (const p of dirty) vfs.markClean(p);
+    // Files not covered by any ghPrefix are local-only — always mark clean
+    const coveredByGh = (p) => ghPrefixes.some(pfx => p.startsWith(pfx));
+    for (const p of dirty) {
+      if (!gh || !coveredByGh(p)) cleanable.add(p);
+    }
+
+    for (const p of cleanable) vfs.markClean(p);
     return dirty;
   };
 }
