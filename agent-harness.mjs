@@ -15,16 +15,16 @@ import { execSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stdin as input, stdout as output, env } from 'node:process';
-import { createVFS, execute, extractCode } from './src/agent-core.js';
-import { runTurn, buildSkillIndex } from './src/agent-loop.js';
-import { runRSI, runSkillRSI } from './src/agent-rsi.js';
-import { createGitHubClient, initFromGitHub, commitToGitHub, parseGitHubRepo } from './src/github.js';
-import { loadSession, saveSession, clearSession, listSessions, migrateLegacySession } from './src/session.js';
-import { snapshotWorkspace, restoreWorkspace, getWorkspaceId, getSelfWorkspaceId, isWorkspacePath } from './src/workspace.js';
-import { buildCreatePrompt, buildImprovePrompt, runWorkflowSteps } from './src/workflow-runner.js';
-import { getLLMClient } from './src/llm-client.js';
-import { dispatchWorkflowCommand } from './src/commands.js';
-import { createCommitFn } from './src/commit.js';
+import { createVFS, execute, extractCode } from './src/core/agent-core.js';
+import { runTurn, buildSkillIndex } from './src/harness/agent-loop.js';
+import { runRSI, runSkillRSI } from './src/harness/agent-rsi.js';
+import { createGitHubClient, initFromGitHub, commitToGitHub, parseGitHubRepo } from './src/runtime/github.js';
+import { loadSession, saveSession, clearSession, listSessions, migrateLegacySession } from './src/runtime/session.js';
+import { snapshotWorkspace, restoreWorkspace, getWorkspaceId, getSelfWorkspaceId, isWorkspacePath } from './src/runtime/workspace.js';
+import { buildCreatePrompt, buildImprovePrompt, runWorkflowSteps } from './src/runtime/workflow-runner.js';
+import { getLLMClient } from './src/core/llm-client.js';
+import { dispatchWorkflowCommand } from './src/runtime/commands.js';
+import { createCommitFn } from './src/runtime/commit.js';
 
 // ════════════════════════════════════════════════════
 // .env loader (zero deps)
@@ -274,10 +274,11 @@ const ui = {
 // ════════════════════════════════════════════════════
 
 function hydrateHarness(vfs) {
-  // Load harness source files from src/
-  for (const f of ['agent-core.js', 'agent-loop.js', 'agent-rsi.js']) {
+  // Load harness source files from src/harness/ (agent-loop, agent-rsi) and src/core/ (agent-core)
+  const harnessFiles = { 'agent-core.js': 'src/core', 'agent-loop.js': 'src/harness', 'agent-rsi.js': 'src/harness' };
+  for (const [f, dir] of Object.entries(harnessFiles)) {
     try {
-      const content = readFileSync(join(__dirname, 'src', f), 'utf8');
+      const content = readFileSync(join(__dirname, dir, f), 'utf8');
       vfs.write(`/harness/${f}`, content);
       vfs.markClean(`/harness/${f}`);
     } catch { /* file not found — skip */ }
@@ -360,7 +361,7 @@ function writeManifest() {
 
 // VFS path → disk path mapping for commit
 const VFS_DISK_MAP = {
-  '/harness/':   'src/',         // /harness/agent-loop.js → ./src/agent-loop.js
+  '/harness/':   'src/harness/', // /harness/agent-loop.js → ./src/harness/agent-loop.js
   '/memory/':    'memory/',      // /memory/experiments.jsonl → ./memory/experiments.jsonl
   '/artifacts/': 'artifacts/',
   '/skills/':    'skills/',

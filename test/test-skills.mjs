@@ -1,5 +1,5 @@
-import { createVFS } from '../src/agent-core.js';
-import { buildSkillIndex, parseSkillFrontmatter } from '../src/agent-loop.js';
+import { createVFS } from '../src/core/agent-core.js';
+import { buildSkillIndex, parseSkillFrontmatter } from '../src/harness/agent-loop.js';
 import { readFileSync } from 'fs';
 
 // ═══ parseSkillFrontmatter ═══
@@ -34,7 +34,7 @@ console.log('PASS: edge cases');
 // ═══ validateSkill via import ═══
 // validateSkill is not exported, but we can test skill RSI imports work
 
-import { runSkillRSI, runSkillExperiment } from '../src/agent-rsi.js';
+import { runSkillRSI, runSkillExperiment } from '../src/harness/agent-rsi.js';
 console.assert(typeof runSkillRSI === 'function', 'runSkillRSI is exported');
 console.assert(typeof runSkillExperiment === 'function', 'runSkillExperiment is exported');
 console.log('PASS: skill RSI exports');

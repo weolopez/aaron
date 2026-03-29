@@ -9,9 +9,9 @@
  * Run: node test/test-workspace.mjs
  */
 
-import { createVFS } from '../src/agent-core.js';
-import { createGitHubClient, initFromGitHub, commitToGitHub } from '../src/github.js';
-import { buildSkillIndex, parseSkillFrontmatter } from '../src/agent-loop.js';
+import { createVFS } from '../src/core/agent-core.js';
+import { createGitHubClient, initFromGitHub, commitToGitHub } from '../src/runtime/github.js';
+import { buildSkillIndex, parseSkillFrontmatter } from '../src/harness/agent-loop.js';
 
 // ════════════════════════════════════════════════════
 // CONFIG

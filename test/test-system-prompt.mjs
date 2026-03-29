@@ -10,8 +10,8 @@
  *   5. SYSTEM prompt stays within a reasonable token budget
  */
 
-import { SYSTEM, buildSkillIndex } from '../src/agent-loop.js';
-import { createVFS } from '../src/agent-core.js';
+import { SYSTEM, buildSkillIndex } from '../src/harness/agent-loop.js';
+import { createVFS } from '../src/core/agent-core.js';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';

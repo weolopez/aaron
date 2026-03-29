@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { createVFS } from '../src/agent-core.js';
-import { SYSTEM, MAX_RETRIES, runTurn } from '../src/agent-loop.js';
-import { runRSI, CONTRACT_RULES } from '../src/agent-rsi.js';
+import { createVFS } from '../src/core/agent-core.js';
+import { SYSTEM, MAX_RETRIES, runTurn } from '../src/harness/agent-loop.js';
+import { runRSI, CONTRACT_RULES } from '../src/harness/agent-rsi.js';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,8 +16,9 @@ console.log('agent-rsi.js:  runRSI=' + typeof runRSI + ', CONTRACT_RULES=' + CON
 
 // Simulate hydrateHarness
 const vfs = createVFS();
-for (const f of ['agent-core.js', 'agent-loop.js', 'agent-rsi.js']) {
-  vfs.write('/harness/' + f, readFileSync(join(ROOT, 'src', f), 'utf8'));
+const harnessFiles = { 'agent-core.js': 'src/core', 'agent-loop.js': 'src/harness', 'agent-rsi.js': 'src/harness' };
+for (const [f, dir] of Object.entries(harnessFiles)) {
+  vfs.write('/harness/' + f, readFileSync(join(ROOT, dir, f), 'utf8'));
   vfs.markClean('/harness/' + f);
 }
 vfs.write('/harness/agent-harness.mjs', readFileSync(join(ROOT, 'agent-harness.mjs'), 'utf8'));

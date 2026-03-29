@@ -60,17 +60,17 @@
  *   GITHUB_TOKEN env var for live GitHub API access
  */
 
-import { createVFS } from '../src/agent-core.js';
-import { buildSkillIndex, parseSkillFrontmatter } from '../src/agent-loop.js';
-import { createGitHubClient, initFromGitHub, commitToGitHub } from '../src/github.js';
+import { createVFS } from '../src/core/agent-core.js';
+import { buildSkillIndex, parseSkillFrontmatter } from '../src/harness/agent-loop.js';
+import { createGitHubClient, initFromGitHub, commitToGitHub } from '../src/runtime/github.js';
 import {
   createWorkspace, snapshotWorkspace, restoreWorkspace,
   getWorkspaceId, getSelfWorkspaceId,
   isWorkspacePath, isAgentPath,
   WORKSPACE_PREFIXES, AGENT_PREFIXES,
   getWorkspaceSummary, isEmptyWorkspace,
-} from '../src/workspace.js';
-import { saveSession, loadSession, clearSession } from '../src/session.js';
+} from '../src/runtime/workspace.js';
+import { saveSession, loadSession, clearSession } from '../src/runtime/session.js';
 
 // ════════════════════════════════════════════════════
 // TEST HARNESS

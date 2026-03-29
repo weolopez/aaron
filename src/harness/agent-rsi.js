@@ -18,7 +18,7 @@
  */
 
 import { buildSkillIndex } from './agent-loop.js';
-import { createGitHubClient, commitToGitHub } from './github.js';
+import { createGitHubClient, commitToGitHub } from '../runtime/github.js';
 
 const isNode = typeof process !== 'undefined' && !!process.versions?.node;
 

@@ -5,7 +5,7 @@
  * Keep this logic reusable across CLI/REPL/web-driven execution flows.
  */
 
-import { createCommitFn } from './commit.js';
+import { createCommitFn } from '../runtime/commit.js';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
