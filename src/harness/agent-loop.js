@@ -8,8 +8,8 @@
  * Exports: SYSTEM, MAX_RETRIES, runTurn
  */
 
-import { getLLMClient } from './llm-client.js';
-import { saveSession } from './session.js';
+import { getLLMClient } from '../core/llm-client.js';
+import { saveSession } from '../runtime/session.js';
 
 // ════════════════════════════════════════════════════
 // SYSTEM PROMPT

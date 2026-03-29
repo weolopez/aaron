@@ -19,19 +19,19 @@
  * REQUIRES: GITHUB_TOKEN and ANTHROPIC_API_KEY env vars
  */
 
-import { createGitHubClient } from '../src/github.js';
-import { runWorkflowSteps } from '../src/workflow-runner.js';
+import { createGitHubClient } from '../src/runtime/github.js';
+import { runWorkflowSteps } from '../src/runtime/workflow-runner.js';
 import {
   buildWorkspaceContext,
   extractPRFromEvents,
-} from '../src/usecase-runtime.js';
+} from '../src/test-support/usecase-runtime.js';
 import {
   createRunReport,
   startScenario,
   addStep,
   addAssertion,
   finalizeReport,
-} from '../src/usecase-report.js';
+} from '../src/test-support/usecase-report.js';
 
 // ════════════════════════════════════════════════════
 // CONFIG

@@ -1,5 +1,5 @@
-import { buildSkillIndex } from '../src/agent-loop.js';
-import { createVFS } from '../src/agent-core.js';
+import { buildSkillIndex } from '../src/harness/agent-loop.js';
+import { createVFS } from '../src/core/agent-core.js';
 import { readdirSync, readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 

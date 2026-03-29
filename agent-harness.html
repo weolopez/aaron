@@ -793,12 +793,12 @@ textarea#input::placeholder { color: var(--dim); }
 
 <script type="module">
 
-import { createVFS, execute, extractCode } from './src/agent-core.js';
-import { runTurn, buildSkillIndex } from './src/agent-loop.js';
-import { createGitHubClient, initFromGitHub, commitToGitHub, parseGitHubRepo } from './src/github.js';
-import { loadSession, saveSession, clearSession } from './src/session.js';
-import { buildCreatePrompt, buildImprovePrompt, listWorkflows, runWorkflowSteps, runWorkflowRSI, buildWorkflowScorer } from './src/workflow-runner.js';
-import { getLLMClient } from './src/llm-client.js';
+import { createVFS, execute, extractCode } from './src/core/agent-core.js';
+import { runTurn, buildSkillIndex } from './src/harness/agent-loop.js';
+import { createGitHubClient, initFromGitHub, commitToGitHub, parseGitHubRepo } from './src/runtime/github.js';
+import { loadSession, saveSession, clearSession } from './src/runtime/session.js';
+import { buildCreatePrompt, buildImprovePrompt, listWorkflows, runWorkflowSteps, runWorkflowRSI, buildWorkflowScorer } from './src/runtime/workflow-runner.js';
+import { getLLMClient } from './src/core/llm-client.js';
 
 // ════════════════════════════════════════════════════
 // CONFIG

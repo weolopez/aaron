@@ -39,7 +39,7 @@ if (res.status === 200) {
 }
 
 // Full client test
-import { createGitHubClient } from '../src/github.js';
+import { createGitHubClient } from '../src/runtime/github.js';
 const client = createGitHubClient({ token });
 const branch = await client.getBranch('weolopez', 'aaron', 'main');
 console.log('Branch SHA:', branch?.sha?.slice(0, 8));

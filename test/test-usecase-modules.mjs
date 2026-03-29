@@ -18,7 +18,7 @@ import {
   addAssertion,
   finalizeReport,
   buildRecommendations,
-} from '../src/usecase-report.js';
+} from '../src/test-support/usecase-report.js';
 
 import {
   extractPRFromEvents,
@@ -26,9 +26,9 @@ import {
   createRecordingEmitter,
   createTestUiAdapter,
   loadDirIntoVfs,
-} from '../src/usecase-runtime.js';
+} from '../src/test-support/usecase-runtime.js';
 
-import { createVFS } from '../src/agent-core.js';
+import { createVFS } from '../src/core/agent-core.js';
 import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';

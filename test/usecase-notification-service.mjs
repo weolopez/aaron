@@ -106,19 +106,19 @@
  * PRs are left open for manual review — close them at the URLs logged.
  */
 
-import { createGitHubClient } from '../src/github.js';
-import { runWorkflowSteps } from '../src/workflow-runner.js';
+import { createGitHubClient } from '../src/runtime/github.js';
+import { runWorkflowSteps } from '../src/runtime/workflow-runner.js';
 import {
   buildWorkspaceContext,
   extractPRFromEvents,
-} from '../src/usecase-runtime.js';
+} from '../src/test-support/usecase-runtime.js';
 import {
   createRunReport,
   startScenario,
   addStep,
   addAssertion,
   finalizeReport,
-} from '../src/usecase-report.js';
+} from '../src/test-support/usecase-report.js';
 
 const DRY_RUN = process.argv.includes('--dry-run');
 

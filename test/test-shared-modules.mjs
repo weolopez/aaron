@@ -10,9 +10,9 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { createVFS } from '../src/agent-core.js';
-import { createCommitFn } from '../src/commit.js';
-import { parseWorkflowArgs, dispatchWorkflowCommand } from '../src/commands.js';
+import { createVFS } from '../src/core/agent-core.js';
+import { createCommitFn } from '../src/runtime/commit.js';
+import { parseWorkflowArgs, dispatchWorkflowCommand } from '../src/runtime/commands.js';
 
 let passed = 0;
 let failed = 0;
@@ -232,8 +232,8 @@ console.log('\nCLI wiring regression (agent-harness.mjs):');
 {
   const cli = readFileSync(new URL('../agent-harness.mjs', import.meta.url), 'utf8');
 
-  assert(cli.includes("import { createCommitFn } from './src/commit.js';"), 'CLI imports createCommitFn from shared module');
-  assert(cli.includes("import { dispatchWorkflowCommand } from './src/commands.js';"), 'CLI imports dispatchWorkflowCommand from shared module');
+  assert(cli.includes("import { createCommitFn } from './src/runtime/commit.js';"), 'CLI imports createCommitFn from shared module');
+  assert(cli.includes("import { dispatchWorkflowCommand } from './src/runtime/commands.js';"), 'CLI imports dispatchWorkflowCommand from shared module');
 
   const createCommitCount = (cli.match(/createCommitFn\(/g) || []).length;
   assert(createCommitCount >= 3, 'CLI uses createCommitFn in all context builders');
