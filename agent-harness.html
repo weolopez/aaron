@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>agent/harness</title>
-<link rel="icon" href="data:,">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;1,400&family=Syne:wght@700;800&display=swap" rel="stylesheet">
 <style>
@@ -66,7 +65,7 @@ html, body {
 /* ── LAYOUT ─────────────────────────────────────── */
 #app {
   display: grid;
-  grid-template-rows: 42px auto auto 1fr;
+  grid-template-rows: 42px auto 1fr;
   height: 100vh;
 }
 
@@ -451,7 +450,31 @@ textarea#input::placeholder { color: var(--dim); }
 .vfs-file:hover { background: var(--bg4); color: var(--text); }
 .vfs-file.dirty { color: var(--amber); }
 .vfs-file .vfs-icon { flex-shrink: 0; font-size: 10px; }
-.vfs-file .vfs-name { overflow: hidden; text-overflow: ellipsis; }
+.vfs-file .vfs-name { overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
+.vfs-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 1px;
+  opacity: 0;
+  transition: opacity 0.1s;
+  flex-shrink: 0;
+}
+.vfs-file:hover .vfs-actions { opacity: 1; }
+.vfs-actions button {
+  background: none; border: none; color: var(--dim);
+  cursor: pointer; font-size: 10px; padding: 1px 4px;
+  border-radius: 2px; line-height: 1;
+}
+.vfs-actions button:hover { color: var(--text); background: var(--bg4); }
+
+/* VFS new-file button */
+#vfs-new {
+  background: none; border: 1px solid var(--border); border-radius: 2px;
+  color: var(--dim2); cursor: pointer; font-size: 13px; padding: 0 5px;
+  line-height: 1.2; margin-left: 4px;
+  transition: color 0.1s, border-color 0.1s;
+}
+#vfs-new:hover { color: var(--text); border-color: var(--amber-brd); }
 
 /* ── FILE VIEWER MODAL ───────────────────────────── */
 .modal-overlay {
@@ -490,18 +513,58 @@ textarea#input::placeholder { color: var(--dim); }
 .modal-path { font-size: 12px; color: var(--amber); }
 .modal-size { font-size: 10px; color: var(--dim); }
 
-.modal-close {
+.modal-close, .modal-act {
   background: none;
   border: none;
   color: var(--dim);
   cursor: pointer;
-  font-size: 16px;
-  padding: 2px 6px;
+  font-size: 11px;
+  padding: 2px 7px;
   border-radius: 2px;
-  transition: color 0.1s, background 0.1s;
+  transition: color 0.1s, background 0.1s, border-color 0.1s;
   line-height: 1;
+  font-family: var(--mono);
+  letter-spacing: 0.03em;
+  border: 1px solid transparent;
 }
-.modal-close:hover { color: var(--text); background: var(--bg4); }
+.modal-close { font-size: 16px; border: none; }
+.modal-close:hover, .modal-act:hover { color: var(--text); background: var(--bg4); }
+.modal-act { color: var(--dim2); border-color: var(--border); }
+.modal-act:hover { border-color: var(--amber-brd); }
+.modal-act.danger:hover { color: var(--red); border-color: var(--red); }
+.modal-act.primary { color: var(--cyan); border-color: var(--cyan-brd); }
+.modal-act.primary:hover { background: var(--bg4); }
+.modal-actions { display: flex; gap: 4px; align-items: center; }
+
+/* Modal textarea for inline editing */
+.modal-textarea {
+  width: 100%;
+  min-height: 200px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.75;
+  background: var(--bg);
+  color: var(--text);
+  border: none;
+  outline: none;
+  resize: vertical;
+  padding: 0;
+  flex: 1;
+}
+
+/* Rename path input */
+.modal-path-input {
+  background: var(--bg3);
+  border: 1px solid var(--amber-brd);
+  color: var(--amber);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  flex: 1;
+  outline: none;
+}
+.modal-path-input:focus { border-color: var(--cyan-brd); }
 
 .modal-body {
   overflow: auto;
@@ -634,21 +697,6 @@ textarea#input::placeholder { color: var(--dim); }
   border-bottom: 1px solid var(--border);
   font-size: 11px;
 }
-.scenarios-bar {
-  display: flex; align-items: center; gap: 6px;
-  padding: 4px 12px;
-  background: var(--bg);
-  border-bottom: 1px solid var(--border);
-  font-size: 11px;
-  flex-wrap: wrap;
-}
-.scenarios-label { color: var(--dim); letter-spacing: 0.06em; }
-.scenario-btn {
-  background: var(--bg2); border: 1px solid var(--border); border-radius: 4px;
-  color: var(--dim2); font-size: 11px; font-family: inherit;
-  padding: 3px 10px; cursor: pointer; transition: color .1s, border-color .1s, background .1s;
-}
-.scenario-btn:hover { color: var(--text); border-color: var(--amber-brd); background: var(--bg3); }
 .gh-bar input {
   background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
   color: var(--text); padding: 3px 8px; font-size: 11px; font-family: inherit;
@@ -682,7 +730,7 @@ textarea#input::placeholder { color: var(--dim); }
 
   <div class="gh-bar">
     <span style="color:var(--dim);">Anthropic</span>
-    <input class="gh-apikey" id="api-key" type="password" placeholder="sk-ant-… or sk-or-… API key" />
+    <input class="gh-apikey" id="api-key" type="password" placeholder="sk-ant-… API key" />
     <button id="api-key-set">set key</button>
     <span style="color:var(--border2);margin:0 4px;">│</span>
     <span style="color:var(--dim);">GitHub</span>
@@ -691,15 +739,6 @@ textarea#input::placeholder { color: var(--dim); }
     <button id="gh-connect">connect</button>
     <button id="gh-push" disabled>push</button>
     <span class="gh-status" id="gh-status">disconnected</span>
-  </div>
-
-  <!-- SCENARIOS bar -->
-  <div class="scenarios-bar" id="scenarios-bar">
-    <span class="scenarios-label">Scenarios:</span>
-    <button class="scenario-btn" data-scenario="init">🔍 Init Workspace</button>
-    <button class="scenario-btn" data-scenario="bugfix">🐛 Bug Fix → PR</button>
-    <button class="scenario-btn" data-scenario="feature">✨ Feature → PR</button>
-    <button class="scenario-btn" data-scenario="summarize">📋 Summarize Repo</button>
   </div>
 
   <main>
@@ -742,6 +781,7 @@ textarea#input::placeholder { color: var(--dim); }
         <div class="panel-label">
           VFS
           <span class="count" id="vfs-count">0</span>
+          <button id="vfs-new" title="New file">+</button>
         </div>
         <div class="panel-body" id="vfs-tree">
           <div class="panel-empty">Empty — agent writes files here.</div>
@@ -755,10 +795,9 @@ textarea#input::placeholder { color: var(--dim); }
 
 import { createVFS, execute, extractCode } from './src/agent-core.js';
 import { runTurn, buildSkillIndex } from './src/agent-loop.js';
-import { createGitHubClient, initFromGitHub, syncFromGitHub, commitToGitHub, parseGitHubRepo } from './src/github.js';
+import { createGitHubClient, initFromGitHub, commitToGitHub, parseGitHubRepo } from './src/github.js';
 import { loadSession, saveSession, clearSession } from './src/session.js';
-import { dispatchWorkflowCommand } from './src/commands.js';
-import { createCommitFn } from './src/commit.js';
+import { buildCreatePrompt, buildImprovePrompt, listWorkflows, runWorkflowSteps, runWorkflowRSI, buildWorkflowScorer } from './src/workflow-runner.js';
 import { getLLMClient } from './src/llm-client.js';
 
 // ════════════════════════════════════════════════════
@@ -768,16 +807,8 @@ import { getLLMClient } from './src/llm-client.js';
 const MODEL = 'claude-sonnet-4-20250514';
 
 // ── API KEY (stored for llm-client.js to read) ──
-// Auto-detects OpenRouter keys (sk-or-...) vs Anthropic keys (sk-ant-...)
 function storeApiKey(apiKey) {
-  if (!apiKey) return;
-  if (apiKey.startsWith('sk-or-')) {
-    localStorage.setItem('OPENROUTER_API_KEY', apiKey);
-    localStorage.removeItem('ANTHROPIC_API_KEY');
-  } else {
-    localStorage.setItem('ANTHROPIC_API_KEY', apiKey);
-    localStorage.removeItem('OPENROUTER_API_KEY');
-  }
+  if (apiKey) localStorage.setItem('ANTHROPIC_API_KEY', apiKey);
 }
 
 // ════════════════════════════════════════════════════
@@ -956,6 +987,10 @@ const ui = {
         html += `<div class="vfs-file ${dirty ? 'dirty' : ''}" data-path="${esc(p)}">
           <span class="vfs-icon">${icon}</span>
           <span class="vfs-name">${esc(name)}</span>
+          <span class="vfs-actions">
+            <button class="vfs-act-preview" data-path="${esc(p)}" title="Open in preview">◈</button>
+            <button class="vfs-act-delete" data-path="${esc(p)}" title="Delete">✕</button>
+          </span>
         </div>`;
       }
     }
@@ -963,11 +998,28 @@ const ui = {
     vfsEl.innerHTML = html;
 
     vfsEl.querySelectorAll('.vfs-file').forEach(el => {
-      el.addEventListener('click', () => {
-        const path    = el.dataset.path;
-        const content = agentState.context.vfs.read(path) ?? '';
-        const bytes   = new Blob([content]).size;
-        showModal(path, content, bytes);
+      el.addEventListener('click', (e) => {
+        if (e.target.closest('.vfs-actions')) return;
+        const path = el.dataset.path;
+        showFileModal(path);
+      });
+    });
+
+    vfsEl.querySelectorAll('.vfs-act-preview').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        previewFile(btn.dataset.path);
+      });
+    });
+
+    vfsEl.querySelectorAll('.vfs-act-delete').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const path = btn.dataset.path;
+        if (!confirm(`Delete ${path}?`)) return;
+        agentState.context.vfs.delete(path);
+        ui.refreshVFS(agentState.context.vfs);
+        refreshPreviewSelect();
       });
     });
   },
@@ -985,24 +1037,116 @@ const ui = {
   },
 };
 
-function showModal(path, content, bytes) {
+function showFileModal(path) {
+  const vfs = agentState.context.vfs;
+  let content = vfs.read(path) ?? '';
+  let bytes = new Blob([content]).size;
+  let editing = false;
+  let renaming = false;
+  let currentPath = path;
+
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
-  overlay.innerHTML = `
-    <div class="modal">
-      <div class="modal-header">
-        <span class="modal-path">${esc(path)}</span>
-        <span class="modal-size">${bytes} bytes</span>
-        <button class="modal-close">✕</button>
-      </div>
-      <div class="modal-body"><pre>${esc(content)}</pre></div>
-    </div>`;
   document.body.appendChild(overlay);
-  overlay.querySelector('.modal-close').onclick = () => overlay.remove();
-  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
-  document.addEventListener('keydown', function esc(e) {
-    if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', esc); }
-  });
+
+  function render() {
+    bytes = new Blob([content]).size;
+    overlay.innerHTML = `
+      <div class="modal">
+        <div class="modal-header">
+          ${renaming
+            ? `<input class="modal-path-input" id="rename-input" value="${esc(currentPath)}" />`
+            : `<span class="modal-path">${esc(currentPath)}</span>`
+          }
+          <span class="modal-size">${bytes} bytes</span>
+          <div class="modal-actions">
+            ${editing
+              ? `<button class="modal-act primary" id="m-save">save</button>
+                 <button class="modal-act" id="m-cancel">cancel</button>`
+              : renaming
+              ? `<button class="modal-act primary" id="m-rename-save">save</button>
+                 <button class="modal-act" id="m-rename-cancel">cancel</button>`
+              : `<button class="modal-act" id="m-edit" title="Edit file">✎ edit</button>
+                 <button class="modal-act" id="m-rename" title="Rename file">✏ rename</button>
+                 <button class="modal-act" id="m-preview" title="Open in preview">◈ preview</button>
+                 <button class="modal-act danger" id="m-delete" title="Delete file">✕ delete</button>`
+            }
+            <button class="modal-close" id="m-close">✕</button>
+          </div>
+        </div>
+        <div class="modal-body">
+          ${editing
+            ? `<textarea class="modal-textarea" id="modal-editor">${esc(content)}</textarea>`
+            : `<pre>${esc(content)}</pre>`
+          }
+        </div>
+      </div>`;
+
+    overlay.querySelector('#m-close').onclick = () => close();
+
+    if (editing) {
+      overlay.querySelector('#m-save').onclick = () => {
+        content = overlay.querySelector('#modal-editor').value;
+        vfs.write(currentPath, content);
+        ui.refreshVFS(vfs);
+        refreshPreviewSelect();
+        editing = false;
+        render();
+      };
+      overlay.querySelector('#m-cancel').onclick = () => {
+        content = vfs.read(currentPath) ?? '';
+        editing = false;
+        render();
+      };
+      // focus textarea
+      const ta = overlay.querySelector('#modal-editor');
+      if (ta) { ta.focus(); ta.setSelectionRange(0, 0); }
+    } else if (renaming) {
+      overlay.querySelector('#m-rename-save').onclick = () => {
+        const newPath = overlay.querySelector('#rename-input').value.trim();
+        if (!newPath || newPath === currentPath) { renaming = false; render(); return; }
+        vfs.write(newPath, content);
+        vfs.delete(currentPath);
+        currentPath = newPath;
+        content = vfs.read(currentPath) ?? '';
+        renaming = false;
+        ui.refreshVFS(vfs);
+        refreshPreviewSelect();
+        render();
+      };
+      overlay.querySelector('#m-rename-cancel').onclick = () => { renaming = false; render(); };
+      const inp = overlay.querySelector('#rename-input');
+      if (inp) { inp.focus(); inp.select(); }
+      inp.addEventListener('keydown', e => {
+        if (e.key === 'Enter') overlay.querySelector('#m-rename-save').click();
+        if (e.key === 'Escape') overlay.querySelector('#m-rename-cancel').click();
+      });
+    } else {
+      overlay.querySelector('#m-edit').onclick = () => { editing = true; render(); };
+      overlay.querySelector('#m-rename').onclick = () => { renaming = true; render(); };
+      overlay.querySelector('#m-preview').onclick = () => { previewFile(currentPath); close(); };
+      overlay.querySelector('#m-delete').onclick = () => {
+        if (!confirm(`Delete ${currentPath}?`)) return;
+        vfs.delete(currentPath);
+        ui.refreshVFS(vfs);
+        refreshPreviewSelect();
+        close();
+      };
+    }
+  }
+
+  function close() {
+    overlay.remove();
+    document.removeEventListener('keydown', onKey);
+  }
+
+  function onKey(e) {
+    if (e.key === 'Escape') close();
+  }
+
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  document.addEventListener('keydown', onKey);
+  render();
 }
 
 // ════════════════════════════════════════════════════
@@ -1054,22 +1198,20 @@ async function hydrateHarness(vfs) {
 // ════════════════════════════════════════════════════
 
 const vfs = createVFS();
-const BROWSER_WORKSPACE_ID = 'browser';
 
 // ── API key UI ──
 const apiKeyInput  = document.getElementById('api-key');
 const apiKeySetBtn = document.getElementById('api-key-set');
 
-// Restore saved API key (OpenRouter takes priority for display)
-const savedApiKey = localStorage.getItem('OPENROUTER_API_KEY') || localStorage.getItem('ANTHROPIC_API_KEY') || '';
+// Restore saved API key
+const savedApiKey = localStorage.getItem('aaron-apikey') || '';
 if (savedApiKey) apiKeyInput.value = savedApiKey;
 
 function applyApiKey() {
   const key = apiKeyInput.value.trim();
   if (!key) return;
   storeApiKey(key);
-  const provider = key.startsWith('sk-or-') ? 'OpenRouter (CORS-friendly)' : 'Anthropic (requires proxy on localhost)';
-  ui.addSysMsg(`API key stored. Provider: ${provider}`);
+  ui.addSysMsg('API key stored. Will be used for next request.');
 }
 
 apiKeySetBtn.addEventListener('click', applyApiKey);
@@ -1163,23 +1305,29 @@ const agentState = {
     fetch: (...args) => fetch(...args),
     emit: (ev) => ui.emitEvent(ev),
     approve: (msg) => window.confirm(`⚠️ Agent Authorization Required\n\n${msg}\n\nAllow execution?`),
-    env: {
-      // Route API calls through the local dev server proxy to avoid browser CORS restrictions.
-      // The proxy forwards requests to api.anthropic.com server-side.
-      // When deployed outside localhost, calls go directly to Anthropic.
-      anthropicApiUrl: ['127.0.0.1', 'localhost'].includes(location.hostname)
-        ? `${location.origin}/v1/messages`
-        : 'https://api.anthropic.com/v1/messages',
-    },
-    workspaceId: BROWSER_WORKSPACE_ID,
+    env: {},
     github: null,
-    commit: createCommitFn({
-      vfs,
-      getGitHub: () => ghClient && ghConfig ? { client: ghClient, config: ghConfig } : null,
-      commitToGitHub,
-      emit: (ev) => agentState.context.emit(ev),
-      ghPrefixes: ['/src/', '/workflows/', '/artifacts/', '/memory/', '/scratch/'],
-    }),
+    async commit(message = 'commit') {
+      const dirty = vfs.list().filter(p => vfs.isDirty(p));
+      // Push to GitHub if connected — /src/, /workflows/, /artifacts/, /memory/, /scratch/
+      if (ghClient && ghConfig) {
+        const ghPrefixes = ['/src/', '/workflows/', '/artifacts/', '/memory/', '/scratch/'];
+        const ghDirty = dirty.filter(p => ghPrefixes.some(prefix => p.startsWith(prefix)));
+        for (const prefix of ghPrefixes) {
+          const prefixDirty = ghDirty.filter(p => p.startsWith(prefix));
+          if (prefixDirty.length === 0) continue;
+          try {
+            await commitToGitHub(vfs, ghClient, {
+              owner: ghConfig.owner, repo: ghConfig.repo,
+              branch: ghConfig.ref, message, pathPrefix: prefix,
+            }, (ev) => agentState.context.emit(ev));
+          } catch { /* commitToGitHub logs via emit */ }
+        }
+      }
+      for (const p of dirty) vfs.markClean(p);
+      agentState.context.emit({ type: 'experiment', id: String(Date.now()), kept: true, reason: message });
+      return dirty;
+    },
   },
 };
 
@@ -1187,14 +1335,10 @@ const deps = { execute, extractCode, ui, runTurn };
 
 // Hydrate harness files into VFS, then auto-connect GitHub if credentials are saved
 hydrateHarness(vfs).then(async () => {
-  const savedSession = await loadSession(BROWSER_WORKSPACE_ID);
+  const savedSession = await loadSession();
   if (savedSession) {
-    for (const [path, entry] of Object.entries(savedSession.vfs || {})) {
-      // entry is either a plain string (old sessions) or { content, sha, dirty } (new sessions)
-      const content = typeof entry === 'string' ? entry : entry.content;
-      const sha = typeof entry === 'string' ? null : entry.sha;
+    for (const [path, content] of Object.entries(savedSession.vfs || {})) {
       vfs.write(path, content);
-      if (sha) { vfs.setSHA(path, sha); vfs.markClean(path); }
     }
     agentState.history = savedSession.state?.history || [];
     agentState.turn = savedSession.state?.turn || 0;
@@ -1205,45 +1349,10 @@ hydrateHarness(vfs).then(async () => {
 
   const saved = (() => { try { return JSON.parse(localStorage.getItem('aaron-github') || 'null'); } catch { return null; } })();
   if (saved?.repo && saved?.token) {
-    const cfg = parseGitHubRepo(saved.repo);
-    if (cfg) {
-      ghConfig = cfg;
-      ghClient = createGitHubClient({ token: saved.token });
-      ghRepoInput.value = saved.repo;
-      ghTokenInput.value = saved.token;
-      ghStatusEl.textContent = `connecting to ${cfg.owner}/${cfg.repo}...`;
-
-      try {
-        // Use differential sync when a SHA cache exists, full fetch otherwise.
-        // Pass SHA cache directly — VFS is empty at startup so vfs.setSHA() would be a no-op.
-        const shaCache = (() => { try { return JSON.parse(localStorage.getItem('aaron-sha-cache') || '{}'); } catch { return {}; } })();
-        const hasSHACache = Object.keys(shaCache).length > 0;
-        const hydrateFn = hasSHACache ? syncFromGitHub : initFromGitHub;
-        const result = await hydrateFn(cfg, vfs, ghClient, (ev) => ui.emitEvent(ev), shaCache);
-        ghStatusEl.textContent = `${cfg.owner}/${cfg.repo}@${cfg.ref} (${result.files} files)`;
-        ghStatusEl.classList.add('connected');
-        ghPushBtn.disabled = false;
-        agentState.context.github = { owner: cfg.owner, repo: cfg.repo, ref: cfg.ref };
-        ui.refreshVFS(vfs);
-        const msg = hasSHACache
-          ? `GitHub synced: ${result.cached ?? result.files} cached, ${result.updated ?? 0} updated from ${cfg.owner}/${cfg.repo}@${cfg.ref}`
-          : `GitHub connected: ${result.files} files loaded from ${cfg.owner}/${cfg.repo}@${cfg.ref}`;
-        ui.addSysMsg(msg);
-
-        // Persist SHA-only cache (few KB) for next reload — full VFS content is too large for localStorage
-        try {
-          const snap = vfs.snapshot ? vfs.snapshot() : {};
-          const shaMap = {};
-          for (const [p, meta] of Object.entries(snap)) { if (meta?.sha) shaMap[p] = meta.sha; }
-          localStorage.setItem('aaron-sha-cache', JSON.stringify(shaMap));
-        } catch { /* quota exceeded — cache unavailable */ }
-      } catch (e) {
-        ghStatusEl.textContent = `error: ${e.message}`;
-        ghStatusEl.classList.remove('connected');
-        ghClient = null; ghConfig = null;
-        ui.addSysMsg(`GitHub connection failed: ${e.message}`);
-      }
-    }
+    // Auto-connect to GitHub — loads latest skills, workflows, memory from repo
+    ghRepoInput.value = saved.repo;
+    ghTokenInput.value = saved.token;
+    await ghConnect();
     // Rebuild skill index after GitHub hydration
     agentState.context.skillIndex = buildSkillIndex(vfs);
   }
@@ -1302,48 +1411,98 @@ async function handleSend() {
   }
 
   if (msg === ':workflow' || msg.startsWith(':workflow ')) {
-    const wfArgs = msg.slice(10).trim();
-    await dispatchWorkflowCommand(wfArgs, {
-      vfs, state: agentState, deps,
-      getLLMClient: () => getLLMClient({ apiUrl: agentState.context.env.anthropicApiUrl }),
-      callbacks: {
-        onError:    (m) => ui.addSysMsg(m),
-        onNotFound: (n) => ui.addSysMsg(`Workflow "${n}" not found.\n\nCreate it first:\n  :workflow create ${n} <goal>`),
-        onList: (workflows) => {
-          if (workflows.length === 0) {
-            ui.addSysMsg('No workflows yet.\n\nCreate one:\n  :workflow create <name> <goal description>');
-          } else {
-            const lines = workflows.map(wf => {
-              const status = wf.status === 'complete'    ? '✓ complete'
-                           : wf.status === 'in-progress' ? `step: ${wf.currentStep}`
-                           : 'not started';
-              return `${wf.name}  [${status}]${wf.description ? '\n  ' + wf.description : ''}`;
-            });
-            ui.addSysMsg('Workflows:\n' + lines.join('\n\n') + '\n\n:workflow <name>                    — run\n:workflow create <name> <goal>      — create new\n:workflow improve <name> <feedback> — revise steps\n:workflow rsi <name> [budget]       — iterate definition');
-          }
-        },
-        onUserMsg:  (text) => ui.addUserMsg(text),
-        onRSIStart: (n, b) => ui.addSysMsg(`Workflow RSI: ${n} — ${b} experiments (LLM scoring)…`),
-        onRSILog:   (m) => ui.addSysMsg(m),
-        onRSIDone:  (results) => {
-          const kept = results.filter(r => r.kept).length;
-          ui.addSysMsg(`Workflow RSI complete: ${kept}/${results.length} experiments kept`);
-        },
-        onRunStart: (n, done, total) => ui.addSysMsg(`Workflow: ${n} (${done}/${total} steps done). Running steps…`),
-        stepCallbacks: {
-          onStepDone: (id) => {
-            ui.addSysMsg(`✓ [${id}] complete`);
-            const artifactPaths = vfs.list().filter(p => p.startsWith(`/artifacts/`) && isPreviewable(p));
-            if (artifactPaths.length > 0) {
-              refreshPreviewSelect();
-              previewSelect.value = artifactPaths[artifactPaths.length - 1];
-              renderPreview();
-            }
-          },
-          onComplete: (name) => ui.addSysMsg(`✅ Workflow "${name}" complete!`),
-          onUserMsg:  (text) => ui.addUserMsg(`[step] ${text.slice(0, 100)}…`),
-        },
+    const args = msg.slice(10).trim();
+
+    // ── :workflow list (or bare :workflow) ──
+    if (!args || args === 'list') {
+      const workflows = listWorkflows(vfs);
+      if (workflows.length === 0) {
+        ui.addSysMsg('No workflows yet.\n\nCreate one:\n  :workflow create <name> <goal description>');
+      } else {
+        const lines = workflows.map(wf => {
+          const status = wf.status === 'complete'    ? '✓ complete'
+                       : wf.status === 'in-progress' ? `step: ${wf.currentStep}`
+                       : 'not started';
+          return `${wf.name}  [${status}]${wf.description ? '\n  ' + wf.description : ''}`;
+        });
+        ui.addSysMsg('Workflows:\n' + lines.join('\n\n') + '\n\n:workflow <name>                    — run\n:workflow create <name> <goal>      — create new\n:workflow improve <name> <feedback> — revise steps\n:workflow rsi <name> [budget]       — iterate definition');
+      }
+      return;
+    }
+
+    // ── :workflow create <name> <goal> ──
+    if (args.startsWith('create ')) {
+      const rest = args.slice(7).trim();
+      const spaceIdx = rest.indexOf(' ');
+      if (spaceIdx === -1) { ui.addSysMsg('Usage: :workflow create <name> <goal description>'); return; }
+      const wfName = rest.slice(0, spaceIdx);
+      const goal = rest.slice(spaceIdx + 1).trim();
+      ui.addUserMsg(`:workflow create ${wfName} ${goal}`);
+      await runTurn(buildCreatePrompt(wfName, goal), agentState, deps);
+      return;
+    }
+
+    // ── :workflow improve <name> <feedback> ──
+    if (args.startsWith('improve ')) {
+      const rest = args.slice(8).trim();
+      const spaceIdx = rest.indexOf(' ');
+      if (spaceIdx === -1) { ui.addSysMsg('Usage: :workflow improve <name> <feedback>'); return; }
+      const wfName = rest.slice(0, spaceIdx);
+      const feedback = rest.slice(spaceIdx + 1).trim();
+      if (!vfs.read(`/workflows/${wfName}.json`)) {
+        ui.addSysMsg(`Workflow "${wfName}" not found.\n\nCreate it first:\n  :workflow create ${wfName} <goal>`);
+        return;
+      }
+      ui.addUserMsg(`:workflow improve ${wfName} "${feedback}"`);
+      await runTurn(buildImprovePrompt(wfName, feedback), agentState, deps);
+      return;
+    }
+
+    // ── :workflow rsi <name> [budget] ──
+    if (args.startsWith('rsi ')) {
+      const rest = args.slice(4).trim();
+      const parts = rest.split(/\s+/);
+      const wfRsiName = parts[0];
+      const budget = parseInt(parts[1], 10) || 3;
+      if (!wfRsiName) { ui.addSysMsg('Usage: :workflow rsi <name> [budget]'); return; }
+      if (!vfs.read(`/workflows/${wfRsiName}.json`)) {
+        ui.addSysMsg(`Workflow "${wfRsiName}" not found.\n\nCreate it first:\n  :workflow create ${wfRsiName} <goal>`);
+        return;
+      }
+      ui.addSysMsg(`Workflow RSI: ${wfRsiName} — ${budget} experiments (LLM scoring)…`);
+      const scorer = buildWorkflowScorer(getLLMClient());
+      const results = await runWorkflowRSI({ wfName: wfRsiName, budget, state: agentState, deps, scorer });
+      const kept = results.filter(r => r.kept).length;
+      ui.addSysMsg(`Workflow RSI complete: ${kept}/${results.length} experiments kept`);
+      return;
+    }
+
+    // ── :workflow <name> — run or resume ──
+    const wfName = args;
+    const wfRaw = vfs.read(`/workflows/${wfName}.json`);
+    if (!wfRaw) {
+      ui.addSysMsg(`Workflow "${wfName}" not found.\n\nCreate it first:\n  :workflow create ${wfName} <goal description>`);
+      return;
+    }
+    let wf;
+    try { wf = JSON.parse(wfRaw); } catch { ui.addSysMsg(`Invalid workflow JSON: /workflows/${wfName}.json`); return; }
+
+    const doneCount = (() => { try { return JSON.parse(vfs.read('/scratch/workflow-state.json') || 'null')?.completedSteps?.length ?? 0; } catch { return 0; } })();
+    ui.addSysMsg(`Workflow: ${wfName} (${doneCount}/${wf.steps.length} steps done). Running steps…`);
+
+    await runWorkflowSteps(wf, wfName, vfs, agentState, deps, {
+      onStepDone: (id) => {
+        ui.addSysMsg(`✓ [${id}] complete`);
+        // Auto-preview latest artifact from this workflow
+        const artifactPaths = vfs.list().filter(p => p.startsWith(`/artifacts/${wfName}/`) && isPreviewable(p));
+        if (artifactPaths.length > 0) {
+          refreshPreviewSelect();
+          previewSelect.value = artifactPaths[artifactPaths.length - 1];
+          renderPreview();
+        }
       },
+      onComplete: (name) => ui.addSysMsg(`✅ Workflow "${name}" complete!`),
+      onUserMsg:  (text) => ui.addUserMsg(`[step] ${text.slice(0, 100)}…`),
     });
     return;
   }
@@ -1351,59 +1510,10 @@ async function handleSend() {
   // ── Normal agent turn ─────────────────────────────
   ui.addUserMsg(msg);
   await runTurn(msg, agentState, deps);
-  // Save only dirty VFS entries (agent-written files) — GitHub-fetched files are too large for localStorage
-  const dirtyVfs = { snapshot: () => {
-    const snap = {};
-    for (const p of vfs.list()) { if (vfs.isDirty(p)) { const s = vfs.snapshot(); if (s[p]) snap[p] = s[p]; } }
-    return snap;
-  }};
-  await saveSession(BROWSER_WORKSPACE_ID, agentState, dirtyVfs);
+  await saveSession(agentState, vfs);
 }
 
 sendBtn.addEventListener('click', handleSend);
-
-// ── Scenario buttons ──────────────────────────────────────────────────
-const SCENARIO_PROMPTS = {
-  init: `Use the init skill to explore this workspace.
-List all files in /src/ using context.vfs.list(), read key files, and write a structured summary to /memory/project-notes.md covering:
-- Project type and purpose
-- File structure and src/ file count
-- Missing tests (look for test/ directory)
-- Any ADR, docs, or requirements files`,
-
-  bugfix: `Run the bug-fix workflow (:workflow bug-fix) to diagnose and fix any issues in this repo.
-If no workflow exists, do this manually:
-1. Read src/ files to understand the codebase
-2. Look for any obvious bugs, off-by-one errors, or wrong defaults
-3. Write a diagnosis to /scratch/bug-fix/diagnosis.md
-4. Apply the fix to the affected file in /src/
-5. Commit the fix and open a PR`,
-
-  feature: `Run the plan-implement-verify workflow (:workflow plan-implement-verify) to add a new feature.
-If no workflow exists, read /memory/task.md for the feature request, then:
-1. Plan the implementation and write to /scratch/plan/plan.md
-2. Implement the feature in /src/
-3. Verify the implementation is real (not stubs)
-4. Commit and open a PR`,
-
-  summarize: `Summarize this GitHub repo. Use context.vfs.list() to see all files, then:
-1. Read the README and key source files from /src/
-2. Identify the project type, main purpose, and architecture
-3. List the most important files and what they do
-4. Write a clear summary to /memory/project-notes.md
-Emit a done event with the summary when finished.`,
-};
-
-document.querySelectorAll('.scenario-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const prompt = SCENARIO_PROMPTS[btn.dataset.scenario];
-    if (!prompt) return;
-    inputEl.value = prompt;
-    inputEl.style.height = 'auto';
-    inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + 'px';
-    inputEl.focus();
-  });
-});
 
 // Keyboard shortcut
 inputEl.addEventListener('keydown', e => {
@@ -1432,6 +1542,20 @@ const previewFrame   = document.getElementById('preview-frame');
 const previewEmpty   = document.getElementById('preview-empty');
 
 let showSource = false;
+const pinnedPreviewPaths = new Set();
+
+function previewFile(path) {
+  pinnedPreviewPaths.add(path);
+  refreshPreviewSelect();
+  previewSelect.value = path;
+  showSource = false;
+  previewSrc.classList.remove('active');
+  if (mainEl.classList.contains('preview-hidden')) {
+    mainEl.classList.remove('preview-hidden');
+    previewToggle.classList.add('active');
+  }
+  renderPreview();
+}
 
 // ── THEME ──────────────────────────────────────────
 function applyTheme(light) {
@@ -1469,7 +1593,9 @@ function isPreviewable(path) {
 // Rebuild the file select dropdown from VFS
 function refreshPreviewSelect() {
   const current = previewSelect.value;
-  const paths = vfs.list().filter(isPreviewable);
+  const natural = vfs.list().filter(isPreviewable);
+  const pinned  = [...pinnedPreviewPaths].filter(p => vfs.read(p) !== null);
+  const paths   = [...new Set([...natural, ...pinned])];
   previewSelect.innerHTML = '<option value="">— select file —</option>';
   for (const p of paths) {
     const opt = document.createElement('option');
@@ -1627,6 +1753,18 @@ ${evalScript}
 </html>`;
 }
 
+// Fallback: render any file as source (plain text)
+function buildPlainTextPreview(content) {
+  const isLight = document.documentElement.classList.contains('light');
+  const bg = isLight ? '#edece7' : '#0f0f12';
+  const fg = isLight ? '#28271f' : '#c4c0b8';
+  const escaped = content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return `<!DOCTYPE html><html><head><style>
+    body { background: ${bg}; color: ${fg}; font-family: 'JetBrains Mono', monospace; font-size: 12px; padding: 16px; margin: 0; }
+    pre { white-space: pre-wrap; word-break: break-word; line-height: 1.75; }
+  </style></head><body><pre>${escaped}</pre></body></html>`;
+}
+
 function renderPreview() {
   const path = previewSelect.value;
   if (!path) {
@@ -1645,23 +1783,26 @@ function renderPreview() {
   previewEmpty.style.display = 'none';
   previewFrame.style.display = 'block';
 
-  if (showSource) {
-    // Show raw source in the iframe — respect current theme
-    const isLight = document.documentElement.classList.contains('light');
-    const srcBg   = isLight ? '#edece7' : '#0f0f12';
-    const srcFg   = isLight ? '#28271f' : '#c4c0b8';
-    const escaped = content
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const srcHTML = `<!DOCTYPE html>
-<html><head><style>
-  body { background: ${srcBg}; color: ${srcFg}; font-family: 'JetBrains Mono', monospace; font-size: 12px; padding: 16px; margin: 0; }
-  pre { white-space: pre-wrap; word-break: break-word; line-height: 1.75; }
-</style></head><body><pre>${escaped}</pre></body></html>`;
-    previewFrame.srcdoc = srcHTML;
+  if (showSource || !isPreviewable(path)) {
+    previewFrame.srcdoc = buildPlainTextPreview(content);
   } else {
     previewFrame.srcdoc = buildPreviewHTML(path);
   }
 }
+
+// ── VFS NEW FILE ───────────────────────────────────
+document.getElementById('vfs-new').addEventListener('click', () => {
+  const path = prompt('New file path (e.g. /scratch/notes.md):');
+  if (!path || !path.trim()) return;
+  const p = path.trim().startsWith('/') ? path.trim() : '/' + path.trim();
+  if (agentState.context.vfs.read(p) !== null) {
+    if (!confirm(`${p} already exists. Overwrite?`)) return;
+  }
+  agentState.context.vfs.write(p, '');
+  ui.refreshVFS(agentState.context.vfs);
+  refreshPreviewSelect();
+  showFileModal(p);
+});
 
 // Wire up controls
 previewSelect.addEventListener('change', () => { showSource = false; previewSrc.classList.remove('active'); renderPreview(); });
