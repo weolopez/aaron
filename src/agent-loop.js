@@ -187,15 +187,32 @@ export const MAX_RETRIES = 3;
  *   ui.onTurnComplete(turn, vfs) — refresh display after successful turn
  */
 export async function runTurn(userMessage, state, { execute, extractCode, ui }) {
-  const llm = getLLMClient();
+  const llm = getLLMClient({
+    apiUrl: state.context?.env?.anthropicApiUrl ?? 'https://api.anthropic.com/v1/messages'
+  });
   state.history.push({ role: 'user', content: userMessage });
   ui.setStatus('thinking');
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
-      const systemPrompt = state.context.skillIndex
-        ? SYSTEM + state.context.skillIndex
-        : SYSTEM;
+      // Build workspace context block (repo + VFS summary)
+      let workspaceContext = '';
+      if (state.context.github) {
+        const { owner, repo, ref } = state.context.github;
+        workspaceContext += `\nCURRENT WORKSPACE: ${owner}/${repo}@${ref}\n`;
+        workspaceContext += `  Repo files are mounted at /src/ in the VFS.\n`;
+        workspaceContext += `  Use context.vfs.list() to explore, context.vfs.read('/src/...') to read files.\n`;
+      }
+      const vfsPaths = state.context.vfs?.list?.() ?? [];
+      if (state.context.github && vfsPaths.length > 0) {
+        const repoPaths = vfsPaths.filter(p => p.startsWith('/src/')).map(p => p.slice(5));
+        workspaceContext += `  Repo contains ${repoPaths.length} file(s): ${repoPaths.join(', ')}\n`;
+      } else if (vfsPaths.length > 0) {
+        const dirs = [...new Set(vfsPaths.map(p => p.split('/').slice(0, 3).join('/')))].slice(0, 20);
+        workspaceContext += `  VFS top-level paths (${vfsPaths.length} total): ${dirs.join(', ')}\n`;
+      }
+
+      const systemPrompt = SYSTEM + workspaceContext + (state.context.skillIndex ?? '');
       const data = await llm.call(state.history, systemPrompt);
       const { code } = extractCode(data);
 

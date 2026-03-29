@@ -19,17 +19,19 @@
  * REQUIRES: GITHUB_TOKEN and ANTHROPIC_API_KEY env vars
  */
 
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-import { createVFS, execute, extractCode } from '../src/agent-core.js';
-import { runTurn, buildSkillIndex } from '../src/agent-loop.js';
-import { createGitHubClient, initFromGitHub, commitToGitHub } from '../src/github.js';
+import { createGitHubClient } from '../src/github.js';
 import { runWorkflowSteps } from '../src/workflow-runner.js';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = join(__dirname, '..');
+import {
+  buildWorkspaceContext,
+  extractPRFromEvents,
+} from '../src/usecase-runtime.js';
+import {
+  createRunReport,
+  startScenario,
+  addStep,
+  addAssertion,
+  finalizeReport,
+} from '../src/usecase-report.js';
 
 // ════════════════════════════════════════════════════
 // CONFIG
@@ -61,9 +63,12 @@ let passed = 0, failed = 0, total = 0;
 const failures = [];
 const createdBranches = [];
 const createdPRs = [];
+const report = createRunReport({ owner: OWNER, repo: REPO, ref: BASE, suite: 'realworld' });
+let activeScenario = null;
 
 function assert(condition, label) {
   total++;
+  addAssertion(report, activeScenario, label, condition);
   if (condition) {
     passed++;
     console.log(`  ✅ ${label}`);
@@ -89,132 +94,22 @@ async function sleep(ms) {
 }
 
 // ════════════════════════════════════════════════════
-// VFS FACTORY — build a workspace context for a repo
-// ════════════════════════════════════════════════════
-
-/**
- * Build a context + state ready for runTurn / runWorkflowSteps.
- * Hydrates from GitHub then loads local skills and workflows.
- */
-async function buildWorkspaceContext(owner, repo, ref = 'main') {
-  const vfs = createVFS();
-  const events = [];
-
-  // Load local skills and workflows into VFS
-  function loadDirSync(baseDir, vfsPrefix) {
-    if (!existsSync(baseDir)) return;
-    (function walk(dir, prefix) {
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
-        const disk = join(dir, entry.name);
-        const vp = prefix + entry.name;
-        if (entry.isDirectory()) walk(disk, vp + '/');
-        else {
-          try {
-            vfs.write(vp, readFileSync(disk, 'utf8'));
-            vfs.markClean(vp);
-          } catch { /* skip */ }
-        }
-      }
-    })(baseDir, vfsPrefix);
-  }
-
-  loadDirSync(join(ROOT, 'skills'), '/skills/');
-  loadDirSync(join(ROOT, 'workflows'), '/workflows/');
-
-  // Hydrate from GitHub
-  const hydrated = await initFromGitHub(
-    { owner, repo, ref },
-    vfs,
-    client,
-    (ev) => events.push(ev),
-  );
-
-  const ghHelper = {
-    owner, repo, ref,
-    async getLatestSha(branch = ref) {
-      const data = await client.getBranch(owner, repo, branch);
-      if (!data) throw new Error(`Branch not found: ${branch}`);
-      return data.sha;
-    },
-    async createBranch(name, fromRef = ref) {
-      const sha = await this.getLatestSha(fromRef);
-      await client.createBranch(owner, repo, name, sha);
-    },
-    async createPR({ title, body, head, base = BASE }) {
-      return client.createPR(owner, repo, { title, body, head, base });
-    },
-    async listPRs(state = 'open') {
-      return client.listPRs(owner, repo, state);
-    },
-    async getPR(number) {
-      return client.getPR(owner, repo, number);
-    },
-    async mergePR(number, opts) {
-      return client.mergePR(owner, repo, number, opts);
-    },
-    async deleteBranch(name) {
-      return client.deleteBranch(owner, repo, name);
-    },
-  };
-
-  const skillIndex = buildSkillIndex(vfs);
-  const context = {
-    vfs,
-    fetch: (...args) => fetch(...args),
-    emit: (ev) => {
-      events.push(ev);
-      if (ev.type === 'progress') process.stdout.write(`    ◆ ${ev.message}\n`);
-      else if (ev.type === 'done') process.stdout.write(`    ✓ ${ev.message}\n`);
-      else if (ev.type === 'error') process.stdout.write(`    ✕ ${ev.message}\n`);
-    },
-    env: {},
-    skillIndex,
-    github: ghHelper,
-    async commit(message = 'commit', branch) {
-      const dirty = vfs.list().filter(p => vfs.isDirty(p));
-      const srcDirty = dirty.filter(p => p.startsWith('/src/'));
-      if (srcDirty.length > 0) {
-        await commitToGitHub(vfs, client, {
-          owner, repo,
-          branch: branch ?? ref, message, pathPrefix: '/src/',
-        }, context.emit);
-      }
-      for (const p of dirty) vfs.markClean(p);
-      return dirty;
-    },
-  };
-
-  const state = { history: [], turn: 0, context };
-  const deps = { execute, extractCode, ui: makeUiAdapter(context.emit), runTurn };
-
-  return { vfs, context, state, deps, events, hydrated };
-}
-
-/** Minimal UI adapter for runTurn used in tests. */
-function makeUiAdapter(emit) {
-  return {
-    setStatus() {},
-    showCode() {},
-    emitEvent: emit,
-    onRetry(attempt, max) { process.stdout.write(`    ↺ retry ${attempt}/${max}\n`); },
-    onTurnComplete() {},
-  };
-}
-
-// ════════════════════════════════════════════════════
 // SCENARIO 1: Requirements → ADR + Plan → Pull Request
 // ════════════════════════════════════════════════════
 
 async function scenario1() {
+  activeScenario = startScenario(report, 'scenario1:req-to-pr');
   phase('Scenario 1: Requirements → ADR + Plan → Pull Request');
 
   step('1a. Build workspace context for aaron-test-repo');
-  const ws = await buildWorkspaceContext(OWNER, REPO, BASE);
+  addStep(activeScenario, 'Build workspace context');
+  const ws = await buildWorkspaceContext(client, { owner: OWNER, repo: REPO, ref: BASE, base: BASE });
   assert(ws.hydrated.files > 0, `Hydrated ${ws.hydrated.files} files from GitHub`);
   assert(ws.vfs.list().some(p => p.startsWith('/skills/')), 'Skills loaded into VFS');
   assert(ws.vfs.list().some(p => p.endsWith('.json') && p.includes('/workflows/')), 'Workflows loaded into VFS');
 
   step('1b. Place requirements document in VFS as agent input');
+  addStep(activeScenario, 'Place requirements in /memory/requirements.md');
   const reqContent = ws.vfs.read('/src/REQUIREMENTS.md') ??
     ws.vfs.read('/src/requirements.md') ??
     ws.vfs.read('/src/docs/requirements.md') ??
@@ -229,6 +124,7 @@ async function scenario1() {
   assert(ws.vfs.read('/memory/requirements.md') !== null, 'Requirements doc placed in VFS');
 
   step('1c. Run req-to-pr workflow (plan → implement docs → open PR)');
+  addStep(activeScenario, 'Run workflow req-to-pr');
   const workflowDef = JSON.parse(ws.vfs.read('/workflows/req-to-pr.json'));
   assert(workflowDef?.steps?.length >= 3, `Workflow has ${workflowDef?.steps?.length} steps`);
 
@@ -239,22 +135,12 @@ async function scenario1() {
   await runWorkflowSteps(workflowDef, workflowDef.name, ws.vfs, ws.state, ws.deps, {
     onStepDone(stepId) {
       process.stdout.write(`    ✓ Step "${stepId}" complete\n`);
-      // Extract PR info from result events
-      for (const ev of ws.events) {
-        if (ev.type === 'result' && ev.value?.pr_number) {
-          prNumber = ev.value.pr_number;
-          prUrl = ev.value.pr_url;
-        }
-        if (ev.type === 'result' && ev.value?.pr_url && !prNumber) {
-          prUrl = ev.value.pr_url;
-          const match = ev.value.pr_url?.match(/\/pull\/(\d+)/);
-          if (match) prNumber = parseInt(match[1]);
-        }
-      }
     },
   });
+  ({ prNumber, prUrl } = extractPRFromEvents(ws.events));
 
   step('1d. Verify GitHub state');
+  addStep(activeScenario, 'Verify PR and artifacts');
 
   // Find the branch that was created
   if (prNumber) {
@@ -295,6 +181,7 @@ async function scenario1() {
 // ════════════════════════════════════════════════════
 
 async function scenario2(s1Result) {
+  activeScenario = startScenario(report, 'scenario2:implement-from-plan');
   phase('Scenario 2: Merge docs PR → Implement Feature → New PR');
 
   if (!s1Result?.prNumber) {
@@ -303,6 +190,7 @@ async function scenario2(s1Result) {
   }
 
   step('2a. Merge the documentation PR from Scenario 1');
+  addStep(activeScenario, 'Merge scenario1 PR');
   try {
     await client.mergePR(OWNER, REPO, s1Result.prNumber, { merge_method: 'squash' });
     assert(true, `PR #${s1Result.prNumber} merged`);
@@ -314,7 +202,8 @@ async function scenario2(s1Result) {
   }
 
   step('2b. Hydrate fresh workspace from updated main');
-  const ws = await buildWorkspaceContext(OWNER, REPO, BASE);
+  addStep(activeScenario, 'Hydrate workspace after merge');
+  const ws = await buildWorkspaceContext(client, { owner: OWNER, repo: REPO, ref: BASE, base: BASE });
   assert(ws.hydrated.files > 0, `Re-hydrated ${ws.hydrated.files} files after merge`);
 
   // Check the merged docs are now on main
@@ -322,6 +211,7 @@ async function scenario2(s1Result) {
   assert(planOnMain, 'Documentation files present in main after merge');
 
   step('2c. Run implement-from-plan workflow');
+  addStep(activeScenario, 'Run workflow implement-from-plan');
   const workflowDef = JSON.parse(ws.vfs.read('/workflows/implement-from-plan.json'));
   assert(workflowDef?.steps?.length >= 3, `implement-from-plan has ${workflowDef?.steps?.length} steps`);
 
@@ -331,19 +221,12 @@ async function scenario2(s1Result) {
   await runWorkflowSteps(workflowDef, workflowDef.name, ws.vfs, ws.state, ws.deps, {
     onStepDone(stepId) {
       process.stdout.write(`    ✓ Step "${stepId}" complete\n`);
-      for (const ev of ws.events) {
-        if (ev.type === 'result' && ev.value?.pr_number) {
-          prNumber = ev.value.pr_number;
-        }
-        if (ev.type === 'result' && ev.value?.pr_url) {
-          const match = ev.value.pr_url?.match(/\/pull\/(\d+)/);
-          if (match) prNumber = parseInt(match[1]);
-        }
-      }
     },
   });
+  ({ prNumber } = extractPRFromEvents(ws.events));
 
   step('2d. Verify implementation PR');
+  addStep(activeScenario, 'Verify implementation PR and outputs');
 
   if (prNumber) {
     const pr = await client.getPR(OWNER, REPO, prNumber);
@@ -382,6 +265,7 @@ async function scenario2(s1Result) {
 // ════════════════════════════════════════════════════
 
 async function scenario3(s2Result) {
+  activeScenario = startScenario(report, 'scenario3:bug-fix');
   phase('Scenario 3: Bug Injection → Diagnosis → Fix → PR');
 
   if (!s2Result?.prNumber) {
@@ -390,6 +274,7 @@ async function scenario3(s2Result) {
   }
 
   step('3a. Merge implementation PR from Scenario 2');
+  addStep(activeScenario, 'Merge scenario2 PR');
   try {
     await client.mergePR(OWNER, REPO, s2Result.prNumber, { merge_method: 'squash' });
     assert(true, `PR #${s2Result.prNumber} merged`);
@@ -400,7 +285,8 @@ async function scenario3(s2Result) {
   }
 
   step('3b. Hydrate workspace after implementation merge');
-  const ws = await buildWorkspaceContext(OWNER, REPO, BASE);
+  addStep(activeScenario, 'Hydrate workspace post-merge');
+  const ws = await buildWorkspaceContext(client, { owner: OWNER, repo: REPO, ref: BASE, base: BASE });
   assert(ws.hydrated.files > 0, `Re-hydrated ${ws.hydrated.files} files`);
 
   // Find the notification service source file
@@ -408,6 +294,7 @@ async function scenario3(s2Result) {
   assert(srcFiles.length > 0, `Found ${srcFiles.length} source files from implementation`);
 
   step('3c. Inject a known bug into the codebase');
+  addStep(activeScenario, 'Inject bug into main branch');
   // Find a .js file that looks like a notification service
   const notifFile = srcFiles.find(p =>
     p.includes('notification') || p.includes('service') || p.includes('retry')
@@ -434,8 +321,9 @@ async function scenario3(s2Result) {
   }
 
   step('3d. Write bug report to VFS for the agent');
+  addStep(activeScenario, 'Write /memory/bug-report.md');
   await sleep(500); // let GitHub settle
-  const ws2 = await buildWorkspaceContext(OWNER, REPO, BASE);
+  const ws2 = await buildWorkspaceContext(client, { owner: OWNER, repo: REPO, ref: BASE, base: BASE });
 
   ws2.vfs.write('/memory/bug-report.md', [
     '# Bug Report: Notification Service',
@@ -453,6 +341,7 @@ async function scenario3(s2Result) {
   ].join('\n'));
 
   step('3e. Run bug-fix workflow');
+  addStep(activeScenario, 'Run workflow bug-fix');
   const workflowDef = JSON.parse(ws2.vfs.read('/workflows/bug-fix.json'));
   assert(workflowDef?.steps?.length >= 3, `bug-fix workflow has ${workflowDef?.steps?.length} steps`);
 
@@ -462,19 +351,12 @@ async function scenario3(s2Result) {
   await runWorkflowSteps(workflowDef, workflowDef.name, ws2.vfs, ws2.state, ws2.deps, {
     onStepDone(stepId) {
       process.stdout.write(`    ✓ Step "${stepId}" complete\n`);
-      for (const ev of ws2.events) {
-        if (ev.type === 'result' && ev.value?.pr_number) {
-          prNumber = ev.value.pr_number;
-        }
-        if (ev.type === 'result' && ev.value?.pr_url) {
-          const match = ev.value.pr_url?.match(/\/pull\/(\d+)/);
-          if (match) prNumber = parseInt(match[1]);
-        }
-      }
     },
   });
+  ({ prNumber } = extractPRFromEvents(ws2.events));
 
   step('3f. Verify fix PR');
+  addStep(activeScenario, 'Verify fix PR and diagnosis output');
 
   if (prNumber) {
     const pr = await client.getPR(OWNER, REPO, prNumber);
@@ -511,7 +393,9 @@ async function scenario3(s2Result) {
 // ════════════════════════════════════════════════════
 
 async function cleanup() {
+  activeScenario = startScenario(report, 'cleanup');
   phase('Cleanup: Close PRs and delete branches');
+  addStep(activeScenario, 'Close/open PR check and branch deletion');
 
   for (const num of createdPRs) {
     try {
@@ -574,12 +458,24 @@ async function main() {
 
   // ── Summary ──────────────────────────────────────
 
+  finalizeReport(report);
+
   console.log('\n' + '═'.repeat(64));
   console.log(`  Results: ${passed}/${total} passed`);
   if (failures.length > 0) {
     console.log('\n  Failed assertions:');
     for (const f of failures) console.log(`    ❌ ${f}`);
   }
+  if (report.recommendations.length > 0) {
+    console.log('\n  Recommendations:');
+    for (const rec of report.recommendations) {
+      console.log(`    - [${rec.severity}] ${rec.category}: ${rec.message}`);
+      for (const ev of rec.evidence) console.log(`      • ${ev}`);
+    }
+  }
+  console.log('\n  Structured Summary:');
+  console.log(`    assertions: ${report.meta.summary.passed}/${report.meta.summary.total} passed`);
+  console.log(`    scenarios:  ${report.scenarios.length}`);
   console.log('═'.repeat(64) + '\n');
 
   process.exit(failed > 0 ? 1 : 0);

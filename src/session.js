@@ -93,7 +93,7 @@ export async function saveSession(workspaceId, state, vfs) {
       history: state.history,
       turn: state.turn || 0,
     },
-    vfs: vfs?.dump ? vfs.dump() : {},
+    vfs: vfs?.snapshot ? vfs.snapshot() : (vfs?.dump ? vfs.dump() : {}),
   };
 
   try {
