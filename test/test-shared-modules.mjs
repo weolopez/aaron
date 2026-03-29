@@ -224,7 +224,7 @@ console.log('\ncreateCommitFn:');
   await commit('msg');
 
   assert(emitted.some(ev => ev.type === 'progress' && String(ev.message || '').includes('GitHub push failed: boom')), 'commit emits progress on GitHub push failure');
-  assert(vfs.isDirty('/src/a.js') === false, 'commit still marks files clean after push failure');
+  assert(vfs.isDirty('/src/a.js') === true, 'commit keeps files dirty after push failure (so next commit retries)');
 }
 
 console.log('\nCLI wiring regression (agent-harness.mjs):');

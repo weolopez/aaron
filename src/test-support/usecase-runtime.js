@@ -98,7 +98,7 @@ export function createUsecaseCommit({ vfs, client, owner, repo, ref, emit }) {
     }),
     commitToGitHub: async (vfsRef, ghClient, opts, emitFn) => {
       // Lazy import to avoid circular coupling at module init time.
-      const mod = await import('./github.js');
+      const mod = await import('../runtime/github.js');
       return mod.commitToGitHub(vfsRef, ghClient, opts, emitFn);
     },
     emit,
@@ -129,7 +129,7 @@ export async function loadDirIntoVfs(vfs, baseDir, vfsPrefix) {
 }
 
 // Auto-detect project root from this file's location (src/ → parent dir)
-const _ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+const _ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 
 /**
  * Build a fully-loaded workspace context for running Aaron workflows.
@@ -146,9 +146,9 @@ const _ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
  * @returns {{ vfs, context, state, deps, events, hydrated }}
  */
 export async function buildWorkspaceContext(client, { owner, repo, ref = 'main', base = 'main', rootPath = _ROOT } = {}) {
-  const { createVFS, execute, extractCode } = await import('./agent-core.js');
-  const { runTurn, buildSkillIndex } = await import('./agent-loop.js');
-  const { initFromGitHub } = await import('./github.js');
+  const { createVFS, execute, extractCode } = await import('../core/agent-core.js');
+  const { runTurn, buildSkillIndex } = await import('../harness/agent-loop.js');
+  const { initFromGitHub } = await import('../runtime/github.js');
 
   const vfs = createVFS();
   const events = [];
