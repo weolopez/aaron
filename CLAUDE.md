@@ -24,10 +24,6 @@ python3 -m http.server  # then open http://localhost:8000/agent-harness.html
 # Validation tests
 node test/test-hydration.mjs   # verify VFS hydration and module exports
 node test/test-skills.mjs      # verify skill loading and index building
-
-# RSI demos
-ANTHROPIC_API_KEY=sk-ant-... node rsi-demo.mjs
-ANTHROPIC_API_KEY=sk-ant-... node rsi-ui.mjs
 ```
 
 ### CLI Commands (During Interactive Session)
@@ -36,8 +32,7 @@ ANTHROPIC_API_KEY=sk-ant-... node rsi-ui.mjs
 |---------|--------|
 | `:vfs` | List all VFS files, sizes, dirty flags |
 | `:cat /path` | Print file content |
-| `:rsi [budget]` | Run harness RSI experiment loop (default 5) |
-| `:skill [budget]` | Run skill RSI loop |
+| `:skill [budget]` | Run skill RSI loop (LLM-scored) |
 | `:workflow` | List workflows in `/workflows/` |
 | `:workflow create <name> <goal>` | Create a new workflow definition |
 | `:workflow improve <name> <feedback>` | Revise step prompts via agent turn |
@@ -53,7 +48,7 @@ ANTHROPIC_API_KEY=sk-ant-... node rsi-ui.mjs
 ```
 agent-core.js        ← INVARIANT: createVFS(), execute(), createLLMClient(), extractCode()
 agent-loop.js        ← MUTABLE (RSI target): SYSTEM prompt, runTurn(), MAX_RETRIES
-agent-rsi.js         ← RSI experiment runner, validateContract(), harness/skill scoring
+agent-rsi.js         ← Skill RSI experiment runner, buildSkillScorer(), LLM-scored skill iteration
 agent-harness.mjs    ← CLI harness (Node 18+, ANSI output, disk persistence)
 agent-harness.html   ← Browser harness (DOM, zero deps, platform API proxy)
 src/workflow-runner.js ← Isomorphic workflow orchestration: runWorkflowSteps, runWorkflowRSI,
@@ -87,11 +82,11 @@ context.vfs.list()                // → string[], sorted
 
 ### RSI Loop
 
-**Harness RSI** (`:rsi`):
+**Skill RSI** (`:skill`):
 ```
-snapshot /harness/* → baseline eval → mutate agent-loop.js → contract validate → experiment eval → keep/discard → log to /memory/experiments.jsonl
+snapshot /skills/* → baseline eval (+ LLM score) → mutate SKILL.md → contract validate → experiment eval (+ LLM score) → keep/discard → log to /memory/experiments.jsonl
 ```
-`validateContract()` enforces 7 structural invariants on any mutated `agent-loop.js`. Skill RSI (`:skill`) runs the same loop targeting `/skills/*`.
+`buildSkillScorer(llm)` in `agent-rsi.js` calls the LLM to rate skill output quality 0–10 against the skill's description; prefers LLM score, falls back to heuristic (errors → retries → speed).
 
 **Workflow RSI** (`:workflow rsi <name>`):
 ```
@@ -129,15 +124,13 @@ Skills live in `skills/<name>/SKILL.md` with YAML frontmatter. `buildSkillIndex(
 
 ## RSI Contract Rules
 
-Mutations to `agent-loop.js` **must** honor all 7 invariants (enforced by `validateContract()`):
+Skill mutations (`/skills/*/SKILL.md`) are validated by `validateSkill()`:
 
-1. **ESM only** — `export const`/`export async function`, never `module.exports`
-2. **Required exports** — `SYSTEM` (string), `MAX_RETRIES` (number), `runTurn` (async function)
-3. **`runTurn` signature** — exactly `runTurn(userMessage, state, { llm, execute, extractCode, ui })`
-4. **No inlining invariant core** — never redefine `execute()`, `extractCode()`, `createVFS()`, `createLLMClient()`; use `deps.*`
-5. **No environment branching** — no `typeof window`, `typeof process`
-6. **Use `state.history`** — conversation memory must persist across turns
-7. **Use UI adapter** — `ui.setStatus()`, `ui.showCode()`, `ui.emitEvent()`, `ui.onRetry()`, `ui.onTurnComplete()`
+1. **YAML frontmatter** — must have `---\n...\n---` block with `name` and `description` fields
+2. **Name match** — frontmatter `name` must match the skill directory name
+3. **Substantive body** — body content beyond frontmatter must be 50+ characters
+
+Skill RSI scoring uses `buildSkillScorer(llm)` — LLM rates output quality 0–10 against the skill's description. Falls back to heuristic (errors → retries → speed) when scorer is unavailable.
 
 ## What Not to Do
 

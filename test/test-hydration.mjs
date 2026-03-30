@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createVFS } from '../src/core/agent-core.js';
 import { SYSTEM, MAX_RETRIES, runTurn } from '../src/harness/agent-loop.js';
-import { runRSI, CONTRACT_RULES } from '../src/harness/agent-rsi.js';
+import { runSkillRSI, buildSkillScorer } from '../src/harness/agent-rsi.js';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,7 +12,7 @@ const ROOT = join(__dirname, '..');
 // Verify exports
 console.log('agent-core.js: OK');
 console.log('agent-loop.js: SYSTEM length=' + SYSTEM.length + ', MAX_RETRIES=' + MAX_RETRIES + ', runTurn=' + typeof runTurn);
-console.log('agent-rsi.js:  runRSI=' + typeof runRSI + ', CONTRACT_RULES=' + CONTRACT_RULES.length + ' rules');
+console.log('agent-rsi.js:  runSkillRSI=' + typeof runSkillRSI + ', buildSkillScorer=' + typeof buildSkillScorer);
 
 // Simulate hydrateHarness
 const vfs = createVFS();
