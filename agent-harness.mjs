@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { stdin as input, stdout as output, env } from 'node:process';
 import { createVFS, execute, extractCode } from './src/core/agent-core.js';
 import { runTurn, buildSkillIndex } from './src/harness/agent-loop.js';
-import { runRSI, runSkillRSI } from './src/harness/agent-rsi.js';
+import { runSkillRSI, buildSkillScorer } from './src/harness/agent-rsi.js';
 import { createGitHubClient, initFromGitHub, commitToGitHub, parseGitHubRepo } from './src/runtime/github.js';
 import { loadSession, saveSession, clearSession, listSessions, migrateLegacySession } from './src/runtime/session.js';
 import { snapshotWorkspace, restoreWorkspace, getWorkspaceId, getSelfWorkspaceId, isWorkspacePath } from './src/runtime/workspace.js';
@@ -257,7 +257,6 @@ const ui = {
     output.write(c('dim',  '  :workflow improve <name> <fb>      revise step prompts\n'));
     output.write(c('dim',  '  :workflow rsi <name> [budget]      iterate workflow definition\n'));
     output.write(c('dim',  '  :workflow <name>                   run or resume workflow\n'));
-    output.write(c('dim',  '  :rsi [budget]                      harness RSI loop\n'));
     output.write(c('dim',  '  :skill [budget]                    skill RSI loop\n'));
     output.write(c('dim',  '  :github                            show GitHub status\n'));
     output.write(c('dim',  '  :push [message]                    push /src/ to GitHub\n'));
@@ -619,57 +618,6 @@ async function repl() {
       continue;
     }
 
-    if (msg === ':rsi' || msg.startsWith(':rsi ')) {
-      const args = msg.slice(4).trim();
-      const budget = parseInt(args, 10) || 3;
-
-      output.write('\n' + c('cyan', '  RSI mode') + '\n');
-      output.write(c('gray', '  Enter the eval task (what the agent should accomplish):') + '\n');
-
-      let evalPrompt;
-      try {
-        evalPrompt = await rl.question(c('cyan', 'eval') + c('gray', ' › '));
-      } catch { break; }
-      evalPrompt = evalPrompt.trim();
-      if (!evalPrompt) { output.write(c('gray', '  cancelled\n')); continue; }
-
-      const mutatePrompt = [
-        'CRITICAL: The file you write MUST be valid ESM. Never use require(), module.exports, or any CommonJS syntax. All exports must use the export keyword. Backticks inside template literals must be escaped as \\`.',
-        'Read /harness/agent-loop.js — this is your own harness code.',
-        'Analyze the SYSTEM prompt and the runTurn function.',
-        'Propose ONE targeted improvement that could help the agent complete tasks more reliably (fewer errors, fewer retries, clearer instructions).',
-        'Write the improved version back to /harness/agent-loop.js.',
-        'Explain what you changed and why in a progress emit before the done emit.',
-      ].join('\n');
-
-      const results = await runRSI({
-        evalPrompt,
-        mutatePrompt,
-        budget,
-        state,
-        deps,
-        log: rsiLog,
-      });
-
-      const kept = results.filter(r => r.kept).length;
-      output.write('\n' + c('cyan', `  RSI complete: ${kept}/${results.length} experiments kept`) + '\n');
-
-      // Show final harness diff
-      const currentLoop = state.context.vfs.read('/harness/agent-loop.js');
-      if (currentLoop) {
-        const lines = currentLoop.split('\n').length;
-        output.write(c('gray', `  /harness/agent-loop.js: ${lines} lines`) + '\n');
-      }
-
-      // Show experiment journal
-      const journal = state.context.vfs.read('/memory/experiments.jsonl');
-      if (journal) {
-        output.write(c('gray', `  /memory/experiments.jsonl: ${journal.split('\n').filter(Boolean).length} entries`) + '\n');
-      }
-      ui.hr();
-      continue;
-    }
-
     if (msg === ':skill' || msg.startsWith(':skill ')) {
       const args = msg.slice(6).trim();
       const budget = parseInt(args, 10) || 3;
@@ -684,7 +632,7 @@ async function repl() {
         }
       }
 
-      output.write(c('gray', '  Enter skill name to improve (or a new name to create):') + '\n');
+      output.write(c('gray', '  Enter skill name to improve (or "all" to RSI all skills):') + '\n');
 
       let skillName;
       try {
@@ -692,6 +640,52 @@ async function repl() {
       } catch { break; }
       skillName = skillName.trim();
       if (!skillName) { output.write(c('gray', '  cancelled\n')); continue; }
+
+      // RSI all skills — use each skill's description as eval prompt
+      if (skillName === 'all') {
+        output.write('\n' + c('cyan', `  RSI all skills: ${skillPaths.length} skills × ${budget} experiments each (LLM scoring)`) + '\n\n');
+        const allSummary = [];
+        for (const p of skillPaths) {
+          const name = p.split('/')[2];
+          const content = vfs.read(p);
+          const descMatch = content?.match(/^description:\s*(.+)$/m);
+          const desc = descMatch?.[1]?.trim();
+          if (!desc) {
+            output.write(c('amber', `  ⏭ ${name}: no description, skipping`) + '\n');
+            allSummary.push({ name, kept: 0, total: 0, skipped: true });
+            continue;
+          }
+          const mp = [
+            `Read /skills/${name}/SKILL.md — this is a skill that provides agent instructions.`,
+            `Now analyze how an agent would approach this eval task: "${desc}"`,
+            `Improve the skill instructions to help the agent complete this type of task more reliably.`,
+            `Keep the YAML frontmatter (name, description) and agentskills.io format.`,
+            `Write the improved version back to /skills/${name}/SKILL.md.`,
+            'Explain what you changed and why in a progress emit before the done emit.',
+          ].join('\n');
+          output.write(c('cyan', `  ── ${name} ──`) + '\n');
+          const sc = buildSkillScorer(getLLMClient());
+          const res = await runSkillRSI({ evalPrompt: desc, skillName: name, mutatePrompt: mp, budget, state, deps, log: rsiLog, scorer: sc });
+          const kept = res.filter(r => r.kept).length;
+          allSummary.push({ name, kept, total: res.length, skipped: false });
+          output.write(c('cyan', `  ${name}: ${kept}/${res.length} kept`) + '\n\n');
+        }
+        state.context.skillIndex = buildSkillIndex(vfs);
+        output.write('\n' + c('cyan', '  ═══ RSI ALL SKILLS SUMMARY ═══') + '\n\n');
+        for (const s of allSummary) {
+          if (s.skipped) {
+            output.write(c('gray', `    ${s.name}: skipped`) + '\n');
+          } else {
+            const icon = s.kept > 0 ? c('green', '✓') : c('gray', '·');
+            output.write(`    ${icon} ${s.name}: ${s.kept}/${s.total} kept\n`);
+          }
+        }
+        const totalKept = allSummary.reduce((n, s) => n + s.kept, 0);
+        const totalRun = allSummary.reduce((n, s) => n + s.total, 0);
+        output.write('\n' + c('cyan', `  Total: ${totalKept}/${totalRun} kept across ${skillPaths.length} skills`) + '\n');
+        ui.hr();
+        continue;
+      }
 
       output.write(c('gray', '  Enter the eval task (what the agent should accomplish):') + '\n');
 
@@ -764,7 +758,8 @@ async function repl() {
             `Write the complete SKILL.md to /skills/${skillName}/SKILL.md, then emit progress describing what you built, then emit done.`,
           ].join('\n');
 
-      output.write('\n' + c('cyan', `  Skill RSI: ${skillName} (${existing ? 'improving' : 'creating'})`) + '\n');
+      const scorer = buildSkillScorer(getLLMClient());
+      output.write('\n' + c('cyan', `  Skill RSI: ${skillName} (${existing ? 'improving' : 'creating'}, LLM scoring)`) + '\n');
 
       const results = await runSkillRSI({
         evalPrompt,
@@ -774,6 +769,7 @@ async function repl() {
         state,
         deps,
         log: rsiLog,
+        scorer,
       });
 
       const kept = results.filter(r => r.kept).length;
@@ -1078,6 +1074,7 @@ function skillUsage() {
   output.write(c('dim',  '    aaron skill create <name> "eval task"     ') + c('gray', 'create new skill via RSI\n'));
   output.write(c('dim',  '    aaron skill improve <name> "eval task"    ') + c('gray', 'improve existing skill via RSI\n'));
   output.write(c('dim',  '    aaron skill rsi <name> "eval task"        ') + c('gray', 'create-or-improve (auto-detects)\n'));
+  output.write(c('dim',  '    aaron skill rsi-all                       ') + c('gray', 'RSI all skills (uses description as eval)\n'));
   output.write('\n');
   output.write(c('cyan', '  Options:\n'));
   output.write(c('dim',  '    --budget N   ') + c('gray', 'RSI experiment budget (default: 3)\n'));
@@ -1171,7 +1168,8 @@ async function skillRSI(name, evalTask, budget, mode) {
         'Explain what you changed and why in a progress emit before the done emit.',
       ].join('\n');
 
-  output.write('\n' + c('cyan', `  Skill RSI: ${name} (${isCreate ? 'creating' : 'improving'}) — budget ${budget}`) + '\n\n');
+  const scorer = buildSkillScorer(getLLMClient());
+  output.write('\n' + c('cyan', `  Skill RSI: ${name} (${isCreate ? 'creating' : 'improving'}, LLM scoring) — budget ${budget}`) + '\n\n');
 
   const results = await runSkillRSI({
     evalPrompt: evalTask,
@@ -1181,6 +1179,7 @@ async function skillRSI(name, evalTask, budget, mode) {
     state,
     deps,
     log: rsiLog,
+    scorer,
   });
 
   const kept = results.filter(r => r.kept).length;
@@ -1199,6 +1198,81 @@ async function skillRSI(name, evalTask, budget, mode) {
     output.write(c('gray', `  /memory/experiments.jsonl: ${journal.split('\n').filter(Boolean).length} entries`) + '\n');
   }
   output.write('\n');
+}
+
+async function skillRSIAll(budget) {
+  requireKey();
+  const { vfs, state, deps, rsiLog } = await createRunContext();
+
+  const skillPaths = vfs.list().filter(p => p.startsWith('/skills/') && p.endsWith('/SKILL.md'));
+  if (skillPaths.length === 0) {
+    output.write(c('red', '  No skills installed.\n'));
+    process.exit(1);
+  }
+
+  output.write('\n' + c('cyan', `  RSI all skills: ${skillPaths.length} skills × ${budget} experiments each (LLM scoring)`) + '\n\n');
+
+  const summary = [];
+
+  for (const p of skillPaths) {
+    const name = p.split('/')[2];
+    const content = vfs.read(p);
+    const descMatch = content?.match(/^description:\s*(.+)$/m);
+    const desc = descMatch?.[1]?.trim();
+
+    if (!desc) {
+      output.write(c('amber', `  ⏭ ${name}: no description in frontmatter, skipping`) + '\n');
+      summary.push({ name, kept: 0, total: 0, skipped: true });
+      continue;
+    }
+
+    const evalPrompt = desc;
+    const mutatePrompt = [
+      `Read /skills/${name}/SKILL.md — this is a skill that provides instructions for the agent.`,
+      `Now analyze how an agent would approach this eval task: "${evalPrompt}"`,
+      `Improve the skill instructions to help the agent complete this type of task more reliably.`,
+      `Keep the YAML frontmatter (name, description) and agentskills.io format.`,
+      `Write the improved version back to /skills/${name}/SKILL.md.`,
+      'Explain what you changed and why in a progress emit before the done emit.',
+    ].join('\n');
+
+    output.write(c('cyan', `  ── ${name} ──`) + '\n');
+    output.write(c('gray', `  eval: "${desc}"`) + '\n');
+
+    const scorer = buildSkillScorer(getLLMClient());
+    const results = await runSkillRSI({
+      evalPrompt,
+      skillName: name,
+      mutatePrompt,
+      budget,
+      state,
+      deps,
+      log: rsiLog,
+      scorer,
+    });
+
+    const kept = results.filter(r => r.kept).length;
+    summary.push({ name, kept, total: results.length, skipped: false });
+    output.write(c('cyan', `  ${name}: ${kept}/${results.length} kept`) + '\n\n');
+  }
+
+  // Rebuild skill index to reflect final state
+  state.context.skillIndex = buildSkillIndex(vfs);
+
+  // Summary table
+  output.write('\n' + c('cyan', '  ═══ RSI ALL SKILLS SUMMARY ═══') + '\n\n');
+  for (const s of summary) {
+    if (s.skipped) {
+      output.write(c('gray', `    ${s.name}: skipped (no description)`) + '\n');
+    } else {
+      const icon = s.kept > 0 ? c('green', '✓') : c('gray', '·');
+      output.write(`    ${icon} ${s.name}: ${s.kept}/${s.total} kept\n`);
+    }
+  }
+
+  const totalKept = summary.reduce((n, s) => n + s.kept, 0);
+  const totalRun = summary.reduce((n, s) => n + s.total, 0);
+  output.write('\n' + c('cyan', `  Total: ${totalKept}/${totalRun} experiments kept across ${skillPaths.length} skills`) + '\n\n');
 }
 
 // ════════════════════════════════════════════════════
@@ -1342,8 +1416,7 @@ function usage() {
   output.write(d('    :github                           ') + g('show GitHub connection status\n'));
   output.write(d('    :push [commit message]            ') + g('push dirty /src/ files to GitHub\n'));
   output.write('\n');
-  output.write(d('    :rsi [budget]                     ') + g('run harness RSI experiment loop\n'));
-  output.write(d('    :skill [budget]                   ') + g('run skill RSI experiment loop\n'));
+  output.write(d('    :skill [budget]                   ') + g('run skill RSI experiment loop (LLM scoring)\n'));
   output.write('\n');
   output.write(d('    :workflow                         ') + g('list defined workflows\n'));
   output.write(d('    :workflow <name>                  ') + g('run or resume a workflow\n'));
@@ -1358,6 +1431,7 @@ function usage() {
   output.write(d('    aaron skill create <name> "eval task"        ') + g('create new skill via RSI\n'));
   output.write(d('    aaron skill improve <name> "eval task"       ') + g('improve existing skill via RSI\n'));
   output.write(d('    aaron skill rsi <name> "eval task"           ') + g('create-or-improve (auto-detects)\n'));
+  output.write(d('    aaron skill rsi-all                          ') + g('RSI all skills (uses description as eval)\n'));
   output.write(d('    --budget N                                   ') + g('RSI experiment budget (default: 3)\n'));
   output.write('\n');
 
@@ -1451,6 +1525,8 @@ if (isSkillCmd) {
     const name = argv[2];
     if (!name) { output.write(c('red', '  Missing skill name. Usage: aaron skill show <name>\n')); process.exit(1); }
     skillShow(name).catch(e => fatal(e.message));
+  } else if (sub === 'rsi-all') {
+    skillRSIAll(budget).catch(e => fatal(e.message));
   } else if (sub === 'create' || sub === 'improve' || sub === 'rsi') {
     const name = argv[2];
     const evalTask = argv.slice(3).join(' ').trim();
